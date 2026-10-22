@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "hamster-challenge",
+    "name": "Hamster Challenge",
     "slug": "hamster-challenge",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -8,9 +8,11 @@
     "scheme": "hamsterchallenge",
     "userInterfaceStyle": "automatic",
     "ios": {
+      "bundleIdentifier": "com.zhopa.hamsterchallenge",
       "icon": "./assets/expo.icon"
     },
     "android": {
+      "package": "com.zhopa.hamsterchallenge",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
