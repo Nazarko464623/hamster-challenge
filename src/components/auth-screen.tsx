@@ -3,7 +3,6 @@ import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useState } from 'react';
 import {
-  Alert,
   Keyboard,
   KeyboardAvoidingView,
   Pressable,
@@ -68,22 +67,13 @@ export function AuthScreen({ mode }: AuthScreenProps) {
     }
   };
   const handleNext = () => {
-    const requiredFields = isSignup
-      ? [fields.nickname, fields.email, fields.password, fields.repeatedPassword]
-      : [fields.email, fields.password];
-
-    if (requiredFields.some((value) => !value.trim())) {
-      Alert.alert('Missing information', 'Please fill in all fields to continue.');
-      return;
-    }
-
-    if (isSignup && fields.password !== fields.repeatedPassword) {
-      Alert.alert('Passwords do not match', 'Enter the same password in both password fields.');
-      return;
-    }
-
     Keyboard.dismiss();
-    router.replace('/feed');
+    router.replace({
+      pathname: '/feed',
+      params: {
+        nickname: isSignup ? fields.nickname.trim() : fields.email.trim().split('@')[0],
+      },
+    });
   };
   const rememberMeRow = (
     <Pressable
