@@ -23,15 +23,27 @@ export default function WelcomeScreen() {
           accessibilityRole="button"
           accessibilityLabel="Sign up"
           onPress={() => router.push('/signup')}
-          style={({ pressed }) => [styles.button, styles.signUpButton, pressed && styles.pressed]}>
-          <Text style={styles.signUpText}>Sign up</Text>
+          style={({ pressed }) => [
+            styles.button,
+            styles.signUpButton,
+            pressed && styles.pressedButton,
+          ]}>
+          {({ pressed }) => (
+            <Text style={[styles.signUpText, pressed && styles.pressedButtonText]}>Sign up</Text>
+          )}
         </Pressable>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Log in"
           onPress={() => router.push('/login')}
-          style={({ pressed }) => [styles.button, styles.logInButton, pressed && styles.pressed]}>
-          <Text style={styles.logInText}>Log in</Text>
+          style={({ pressed }) => [
+            styles.button,
+            styles.logInButton,
+            pressed && styles.pressedButton,
+          ]}>
+          {({ pressed }) => (
+            <Text style={[styles.logInText, pressed && styles.pressedButtonText]}>Log in</Text>
+          )}
         </Pressable>
       </View>
 
@@ -98,8 +110,11 @@ const styles = StyleSheet.create({
     color: '#F98C3E',
     fontSize: 20,
   },
-  pressed: {
-    opacity: 0.75,
+  pressedButton: {
+    backgroundColor: '#F98C3E',
+  },
+  pressedButtonText: {
+    color: '#A23A1B',
   },
   legalText: {
     position: 'absolute',
