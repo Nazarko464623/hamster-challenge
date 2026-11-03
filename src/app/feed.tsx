@@ -1,7 +1,7 @@
 import { SymbolView } from 'expo-symbols';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useState } from 'react';
+import { useState, type ComponentProps } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path } from 'react-native-svg';
@@ -32,6 +32,10 @@ const feedTabs = [
 ] as const;
 
 type FeedTabId = (typeof feedTabs)[number]['id'];
+type BattleStatus = 'live' | 'ended';
+type BattleCategory = 'All' | 'Sports' | 'Art' | 'Photo';
+
+const battleCategories: BattleCategory[] = ['All', 'Sports', 'Art', 'Photo'];
 
 type ChatMessage = {
   id: string;
@@ -44,6 +48,74 @@ const conversations = [
   { id: 'mila', name: 'Mila', message: 'That was a close game!', time: 'now', unread: 2, color: '#E89550' },
   { id: 'alex', name: 'Alex', message: 'Are you joining the next challenge?', time: '12:42', unread: 1, color: '#A8A08E' },
   { id: 'team', name: 'Newgen team', message: 'You: Let’s do it 🔥', time: 'Yesterday', unread: 0, color: '#C77A61' },
+] as const;
+
+const liveBattles = [
+  {
+    id: 'jump-rope-live',
+    category: 'Sports',
+    icon: '🏀',
+    title: '30-second jump rope',
+    time: '5h 11m',
+    players: 87,
+    score: 156,
+    rank: 1,
+  },
+  {
+    id: 'pixel-level-live',
+    category: 'Gaming',
+    icon: '🎮',
+    title: 'Daily: a pixel level in 60 seconds',
+    time: '20h 59m',
+    players: 313,
+    score: 77,
+    rank: 1,
+  },
+  {
+    id: 'photo-live',
+    category: 'Photo',
+    icon: '📷',
+    title: 'Golden hour challenge',
+    time: '1d 4h',
+    players: 42,
+    score: 42,
+    rank: 3,
+  },
+  {
+    id: 'pixel-art-live',
+    category: 'Art',
+    icon: '🎨',
+    title: 'Daily pixel art challenge',
+    time: '8h 24m',
+    players: 64,
+    score: 28,
+    rank: 5,
+  },
+] as const;
+
+const endedGames = [
+  {
+    id: 'lava-jump-ended',
+    author: 'volod_hoops',
+    time: '10m ago',
+    challenge: 'Daily: a pixel level in 60 sec',
+    title: 'Lava jump, level 1',
+    votes: 77,
+    comments: 0,
+    artwork: '🎮',
+    artworkColor: '#B8E8C6',
+  },
+  {
+    id: 'jump-rope-ended',
+    author: 'volod_hoops',
+    time: '20m ago',
+    challenge: '30-second jump rope',
+    title: '30-second jump rope',
+    votes: 156,
+    comments: 3,
+    artwork: '🏀',
+    artworkColor: '#FFD276',
+  },
 ] as const;
 
 const initialChatMessages: Record<string, ChatMessage[]> = {
@@ -64,6 +136,7 @@ const initialChatMessages: Record<string, ChatMessage[]> = {
 
 export default function FeedScreen() {
   const [activeTab, setActiveTab] = useState<FeedTabId>('home');
+  const [battleStatus, setBattleStatus] = useState<BattleStatus>('live');
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [chatMessages, setChatMessages] = useState(initialChatMessages);
   const [chatDraft, setChatDraft] = useState('');
@@ -119,7 +192,11 @@ export default function FeedScreen() {
       ) : activeTab === 'profile' ? (
         <ProfileContent displayName={displayName} />
       ) : (
-        <HomeContent topInset={insets.top} />
+        <HomeContent
+          topInset={insets.top}
+          status={battleStatus}
+          onStatusChange={setBattleStatus}
+        />
       )}
 
       <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 10) }]}>
@@ -154,35 +231,6 @@ export default function FeedScreen() {
         })}
       </View>
     </View>
-  );
-}
-
-function HomeContent({ topInset }: { topInset: number }) {
-  return (
-    <>
-      <View style={[styles.searchContainer, { marginTop: Math.max(topInset, 40) }]}>
-        <TextInput
-          accessibilityLabel="Search current games"
-          autoCapitalize="none"
-          placeholder="Search"
-          placeholderTextColor="#F98C3E"
-          returnKeyType="search"
-          style={styles.searchInput}
-        />
-        <SymbolView
-          accessibilityLabel="Search"
-          name={{
-            ios: 'viewfinder',
-            android: 'center_focus_strong',
-            web: 'center_focus_strong',
-          }}
-          size={23}
-          tintColor="#F98C3E"
-          style={styles.searchIcon}
-        />
-      </View>
-      <View style={styles.feedContent} />
-    </>
   );
 }
 
@@ -294,6 +342,186 @@ function LeaderboardContent({ displayName }: { displayName: string }) {
         ))}
       </View>
     </ScrollView>
+  );
+}
+
+function HomeContent({
+  topInset,
+  status,
+  onStatusChange,
+}: {
+  topInset: number;
+  status: BattleStatus;
+  onStatusChange: (status: BattleStatus) => void;
+}) {
+  const [selectedCategory, setSelectedCategory] = useState<BattleCategory>('All');
+  const visibleLiveBattles =
+    selectedCategory === 'All'
+      ? liveBattles
+      : liveBattles.filter((battle) => battle.category === selectedCategory);
+
+  return (
+    <ScrollView
+      style={styles.contentScroll}
+      contentContainerStyle={[
+        styles.battlesContent,
+        { paddingTop: Math.max(topInset, 20) + 10 },
+      ]}
+      showsVerticalScrollIndicator={false}>
+      <View style={styles.battlesHeader}>
+        <Text style={styles.battlesTitle}>Battles</Text>
+        <View style={styles.battleStreakBadge}>
+          <Text style={styles.battleStreakText}>🔥 4-day streak</Text>
+        </View>
+      </View>
+
+      <View style={styles.battleFilters}>
+        {(['live', 'ended'] as const).map((filter) => {
+          const selected = status === filter;
+          const title = filter === 'live' ? 'Live' : 'Ended';
+          return (
+            <Pressable
+              key={filter}
+              accessibilityRole="button"
+              accessibilityLabel={filter === 'live' ? 'Live games' : 'Ended games'}
+              accessibilityState={{ selected }}
+              onPress={() => onStatusChange(filter)}
+              style={[styles.battleFilter, selected && styles.selectedBattleFilter]}>
+              <Text
+                style={[
+                  styles.battleFilterText,
+                  selected && styles.selectedBattleFilterText,
+                ]}>
+                {title}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      {status === 'live' && (
+        <View style={styles.featuredBattle}>
+          <Text style={styles.featuredBattleIcon}>⚡</Text>
+          <View style={styles.featuredBattleDetails}>
+            <Text style={styles.featuredBattleTitle}>Daily battle</Text>
+            <Text style={styles.featuredBattleSubtitle}>
+              a pixel level in 60 seconds · ends in 20h 59m
+            </Text>
+          </View>
+        </View>
+      )}
+
+      {status === 'live' && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.battleCategoryFilters}>
+          {battleCategories.map((category) => {
+            const selected = selectedCategory === category;
+            return (
+              <Pressable
+                key={category}
+                accessibilityRole="button"
+                accessibilityState={{ selected }}
+                onPress={() => setSelectedCategory(category)}
+                style={[styles.battleCategoryFilter, selected && styles.selectedBattleCategoryFilter]}>
+                {category === 'Sports' && <Text style={styles.battleCategoryFilterEmoji}>🏀</Text>}
+                {category === 'Art' && <Text style={styles.battleCategoryFilterEmoji}>🎨</Text>}
+                {category === 'Photo' && <Text style={styles.battleCategoryFilterEmoji}>📷</Text>}
+                <Text
+                  style={[
+                    styles.battleCategoryFilterText,
+                    selected && styles.selectedBattleCategoryFilterText,
+                  ]}>
+                  {category}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      )}
+
+      {status === 'live' && visibleLiveBattles.map((battle) => (
+        <View key={battle.id} style={styles.battleCard}>
+          <View style={styles.battleCategory}>
+            <Text style={styles.battleCategoryIcon}>{battle.icon}</Text>
+            <Text style={styles.battleCategoryText}>{battle.category}</Text>
+          </View>
+          <Text style={styles.battleTitle}>{battle.title}</Text>
+          <View style={styles.battleMeta}>
+            <Text style={styles.battleMetaText}>◷ {battle.time}</Text>
+            <Text style={styles.battleMetaText}>{battle.players} players</Text>
+            <Text style={styles.battleJoined}>✓ Joined</Text>
+          </View>
+          <View style={styles.battleResult}>
+            <View style={styles.battleAvatar}>
+              <Text style={styles.battleAvatarText}>VO</Text>
+            </View>
+            <Text style={styles.battleScore}>{battle.score}</Text>
+            <View style={styles.battleRank}>
+              <Text style={styles.battleRankText}>{battle.rank}</Text>
+            </View>
+          </View>
+        </View>
+      ))}
+      {status === 'ended' &&
+        endedGames.map((game) => <EndedGameCard key={game.id} game={game} />)}
+    </ScrollView>
+  );
+}
+
+function EndedGameCard({ game }: { game: (typeof endedGames)[number] }) {
+  const [hasVoted, setHasVoted] = useState(false);
+
+  return (
+    <View style={styles.endedGameCard}>
+      <View style={styles.endedAuthorRow}>
+        <View style={styles.endedAvatar}>
+          <Text style={styles.endedAvatarText}>
+            {game.author.slice(0, 2).toUpperCase()}
+          </Text>
+        </View>
+        <View style={styles.endedAuthorDetails}>
+          <Text style={styles.endedAuthorName}>{game.author}</Text>
+          <Text style={styles.endedTime}>{game.time}</Text>
+        </View>
+        <Text style={styles.endedChallenge} numberOfLines={1}>
+          {game.challenge}
+        </Text>
+      </View>
+
+      <View style={[styles.endedArtwork, { backgroundColor: game.artworkColor }]}>
+        <View style={styles.endedRankBadge}>
+          <Text style={styles.endedRankText}>#1</Text>
+        </View>
+        <Text style={styles.endedArtworkEmoji}>{game.artwork}</Text>
+      </View>
+
+      <View style={styles.endedDetails}>
+        <Text style={styles.endedTitle}>{game.title}</Text>
+        <View style={styles.endedActions}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={hasVoted ? 'Remove vote' : 'Vote'}
+            accessibilityState={{ selected: hasVoted }}
+            onPress={() => setHasVoted((voted) => !voted)}
+            style={[styles.endedVoteButton, hasVoted && styles.endedVotedButton]}>
+            <Text style={[styles.endedVoteText, hasVoted && styles.endedVotedText]}>
+              ↑ Vote {game.votes + (hasVoted ? 1 : 0)}
+            </Text>
+          </Pressable>
+          <View style={styles.endedCommentCount}>
+            <SymbolView
+              accessibilityLabel="Comments"
+              name={{ ios: 'bubble.right', android: 'chat_bubble_outline', web: 'chat_bubble_outline' }}
+              size={17}
+              tintColor="#B69478"
+            />
+            <Text style={styles.endedCommentText}>{game.comments}</Text>
+          </View>
+        </View>
+      </View>
+    </View>
   );
 }
 
@@ -652,7 +880,94 @@ function ProfileContent({ displayName }: { displayName: string }) {
         <ProfileStat value="7" label="Votes cast" />
         <ProfileStat value="1" label="Wins" />
       </View>
+
+      <View style={styles.profileSectionHeader}>
+        <Text style={styles.profileSectionTitle}>Achievements</Text>
+        <Text style={styles.achievementCount}>2 of 4 unlocked</Text>
+      </View>
+      <View style={styles.achievementsCard}>
+        <AchievementBadge
+          icon={{ ios: 'hand.thumbsup.fill', android: 'thumb_up', web: 'thumb_up' }}
+          label="First vote"
+          unlocked
+        />
+        <AchievementBadge
+          icon={{ ios: 'trophy.fill', android: 'emoji_events', web: 'emoji_events' }}
+          label="First win"
+          unlocked
+        />
+        <AchievementBadge
+          icon={{ ios: 'person.3.fill', android: 'groups', web: 'groups' }}
+          label="10 votes"
+        />
+        <AchievementBadge
+          icon={{ ios: 'flame.fill', android: 'local_fire_department', web: 'local_fire_department' }}
+          label="7-day streak"
+        />
+      </View>
+
+      <View style={styles.pinnedPhotosHeader}>
+        <Text style={styles.profileSectionTitle}>Pinned photos</Text>
+        <SymbolView
+          accessibilityLabel="Pinned photos"
+          name={{ ios: 'pin.fill', android: 'push_pin', web: 'push_pin' }}
+          size={18}
+          tintColor="#E9803F"
+          style={styles.pinnedIcon}
+        />
+      </View>
+      <View style={styles.pinnedPhotosCard}>
+        <View style={styles.pinnedPhotosIconWrap}>
+          <SymbolView
+            accessibilityLabel="Photo collection"
+            name={{ ios: 'photo.on.rectangle.angled', android: 'photo_library', web: 'photo_library' }}
+            size={28}
+            tintColor="#E9803F"
+            style={styles.pinnedPhotosIcon}
+          />
+        </View>
+        <Text style={styles.pinnedPhotosTitle}>Your best moments, on display</Text>
+        <Text style={styles.pinnedPhotosDescription}>
+          Pin your favorite entry photos here when they’re ready to share.
+        </Text>
+      </View>
     </ScrollView>
+  );
+}
+
+function AchievementBadge({
+  icon,
+  label,
+  unlocked = false,
+}: {
+  icon: ComponentProps<typeof SymbolView>['name'];
+  label: string;
+  unlocked?: boolean;
+}) {
+  return (
+    <View
+      accessibilityLabel={`${label}, ${unlocked ? 'unlocked' : 'locked'}`}
+      style={styles.achievementBadge}>
+      <View
+        style={[
+          styles.achievementIconWrap,
+          unlocked ? styles.unlockedAchievement : styles.lockedAchievement,
+        ]}>
+        <SymbolView
+          name={icon}
+          size={23}
+          tintColor={unlocked ? '#FFFFFF' : '#C6B9AC'}
+          style={styles.achievementIcon}
+        />
+      </View>
+      <Text
+        style={[
+          styles.achievementLabel,
+          !unlocked && styles.lockedAchievementLabel,
+        ]}>
+        {label}
+      </Text>
+    </View>
   );
 }
 
@@ -672,32 +987,6 @@ const styles = StyleSheet.create({
     maxWidth: 402,
     alignSelf: 'center',
     backgroundColor: '#FFFFFF',
-  },
-  searchContainer: {
-    height: 38,
-    marginHorizontal: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1.5,
-    borderColor: '#F98C3E',
-    borderRadius: 22,
-    backgroundColor: '#FFF7F2',
-  },
-  searchInput: {
-    flex: 1,
-    height: '100%',
-    paddingLeft: 16,
-    paddingRight: 8,
-    color: '#F98C3E',
-    fontSize: 16,
-  },
-  searchIcon: {
-    width: 26,
-    height: 26,
-    marginHorizontal: 10,
-  },
-  feedContent: {
-    flex: 1,
   },
   profileScroll: {
     flex: 1,
@@ -834,13 +1123,116 @@ const styles = StyleSheet.create({
     color: '#858585',
     fontSize: 14,
   },
+  profileSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 25,
+    marginBottom: 10,
+  },
+  profileSectionTitle: {
+    color: '#44372F',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  achievementCount: {
+    color: '#C77A3E',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  achievementsCard: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 10,
+    paddingVertical: 16,
+    borderWidth: 1,
+    borderColor: '#F3D6BE',
+    borderRadius: 24,
+    backgroundColor: '#FFFAF6',
+  },
+  achievementBadge: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  achievementIconWrap: {
+    width: 48,
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 24,
+  },
+  unlockedAchievement: {
+    backgroundColor: '#F98C3E',
+  },
+  lockedAchievement: {
+    borderWidth: 1.5,
+    borderColor: '#E7DCD2',
+    backgroundColor: '#F8F3EF',
+  },
+  achievementIcon: {
+    width: 25,
+    height: 25,
+  },
+  achievementLabel: {
+    maxWidth: 76,
+    marginTop: 7,
+    color: '#76563F',
+    fontSize: 11,
+    lineHeight: 14,
+    textAlign: 'center',
+  },
+  lockedAchievementLabel: {
+    color: '#A99C91',
+  },
+  pinnedPhotosHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 23,
+    marginBottom: 10,
+  },
+  pinnedIcon: {
+    width: 20,
+    height: 20,
+  },
+  pinnedPhotosCard: {
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 18,
+    borderWidth: 1,
+    borderColor: '#F3D6BE',
+    borderRadius: 24,
+    backgroundColor: '#FFFAF6',
+  },
+  pinnedPhotosIconWrap: {
+    width: 52,
+    height: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 26,
+    backgroundColor: '#FFF0E4',
+  },
+  pinnedPhotosIcon: {
+    width: 30,
+    height: 30,
+  },
+  pinnedPhotosTitle: {
+    marginTop: 10,
+    color: '#5D4635',
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  pinnedPhotosDescription: {
+    maxWidth: 270,
+    marginTop: 4,
+    color: '#9B8774',
+    fontSize: 12,
+    lineHeight: 17,
+    textAlign: 'center',
+  },
   contentScroll: {
     flex: 1,
-  },
-  leaderboardContent: {
-    paddingTop: 42,
-    paddingHorizontal: 18,
-    paddingBottom: 20,
   },
   pageHeading: {
     marginBottom: 18,
@@ -854,13 +1246,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
     color: '#9B8C7F',
     fontSize: 14,
-  },
-  periodSwitch: {
-    height: 44,
-    flexDirection: 'row',
-    padding: 4,
-    borderRadius: 22,
-    backgroundColor: '#FFF2EB',
   },
   periodButton: {
     minWidth: 74,
@@ -880,6 +1265,18 @@ const styles = StyleSheet.create({
   selectedPeriodButtonText: {
     color: '#FFFFFF',
     fontWeight: '600',
+  },
+  leaderboardContent: {
+    paddingTop: 42,
+    paddingHorizontal: 18,
+    paddingBottom: 20,
+  },
+  periodSwitch: {
+    height: 44,
+    flexDirection: 'row',
+    padding: 4,
+    borderRadius: 22,
+    backgroundColor: '#FFF2EB',
   },
   podium: {
     height: 194,
@@ -1049,6 +1446,338 @@ const styles = StyleSheet.create({
   rankingScore: {
     color: '#9B8C7F',
     fontSize: 12,
+  },
+  battlesContent: {
+    paddingTop: 36,
+    paddingHorizontal: 16,
+    paddingBottom: 20,
+  },
+  battlesHeader: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  battlesTitle: {
+    color: '#28231F',
+    fontSize: 25,
+    fontWeight: '700',
+  },
+  battleStreakBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 18,
+    backgroundColor: '#FFF2EB',
+  },
+  battleStreakText: {
+    color: '#D68140',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  battleFilters: {
+    height: 50,
+    flexDirection: 'row',
+    padding: 4,
+    borderRadius: 25,
+    backgroundColor: '#FFF2EB',
+  },
+  battleFilter: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 22,
+  },
+  selectedBattleFilter: {
+    backgroundColor: '#E7842D',
+  },
+  battleFilterText: {
+    color: '#A77F61',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  selectedBattleFilterText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  featuredBattle: {
+    minHeight: 108,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 14,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    borderRadius: 24,
+    backgroundColor: '#E7842D',
+    shadowColor: '#B86B2E',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 7,
+    elevation: 3,
+  },
+  featuredBattleIcon: {
+    fontSize: 26,
+  },
+  featuredBattleDetails: {
+    flex: 1,
+    marginLeft: 14,
+  },
+  featuredBattleTitle: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  featuredBattleSubtitle: {
+    marginTop: 3,
+    color: '#FFF7F0',
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  battleCategoryFilters: {
+    gap: 8,
+    paddingTop: 14,
+    paddingBottom: 2,
+  },
+  battleCategoryFilter: {
+    minHeight: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    paddingHorizontal: 15,
+    borderRadius: 19,
+    backgroundColor: '#FFF2EB',
+  },
+  selectedBattleCategoryFilter: {
+    backgroundColor: '#F98C3E',
+  },
+  battleCategoryFilterEmoji: {
+    fontSize: 12,
+  },
+  battleCategoryFilterText: {
+    color: '#A77F61',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  selectedBattleCategoryFilterText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  battleCard: {
+    marginTop: 14,
+    padding: 16,
+    borderRadius: 22,
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#8D7967',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  battleCategory: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 14,
+    backgroundColor: '#FFF2EB',
+  },
+  battleCategoryIcon: {
+    fontSize: 12,
+  },
+  battleCategoryText: {
+    color: '#B07D50',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  battleTitle: {
+    marginTop: 9,
+    color: '#44372F',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  battleMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 7,
+  },
+  battleMetaText: {
+    color: '#A99B90',
+    fontSize: 12,
+  },
+  battleJoined: {
+    color: '#D68140',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  battleResult: {
+    alignItems: 'center',
+    marginTop: 20,
+  },
+  battleAvatar: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 20,
+    backgroundColor: '#C9552B',
+  },
+  battleAvatarText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  battleScore: {
+    marginTop: 4,
+    color: '#8F8176',
+    fontSize: 13,
+  },
+  battleRank: {
+    width: 84,
+    height: 70,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 7,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    backgroundColor: '#E7842D',
+  },
+  battleRankText: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  endedGameCard: {
+    marginTop: 14,
+    marginHorizontal: 2,
+    overflow: 'hidden',
+    borderRadius: 24,
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#8D7967',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.14,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  endedAuthorRow: {
+    minHeight: 64,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  endedAvatar: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 20,
+    backgroundColor: '#D95B28',
+  },
+  endedAvatarText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  endedAuthorDetails: {
+    marginLeft: 10,
+  },
+  endedAuthorName: {
+    color: '#5D4635',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  endedTime: {
+    marginTop: 2,
+    color: '#A89483',
+    fontSize: 12,
+  },
+  endedChallenge: {
+    maxWidth: '52%',
+    marginLeft: 'auto',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    overflow: 'hidden',
+    borderRadius: 14,
+    backgroundColor: '#FFF2E5',
+    color: '#B07D50',
+    fontSize: 11,
+  },
+  endedArtwork: {
+    width: '100%',
+    aspectRatio: 1.6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  endedRankBadge: {
+    position: 'absolute',
+    top: 12,
+    left: 12,
+    minWidth: 38,
+    height: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+  },
+  endedRankText: {
+    color: '#76563F',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  endedArtworkEmoji: {
+    fontSize: 54,
+  },
+  endedDetails: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 14,
+  },
+  endedTitle: {
+    color: '#5D4635',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  endedActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 10,
+  },
+  endedVoteButton: {
+    minHeight: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: '#E89550',
+    borderRadius: 21,
+    backgroundColor: '#FFF9F4',
+  },
+  endedVotedButton: {
+    backgroundColor: '#F98C3E',
+  },
+  endedVoteText: {
+    color: '#D68140',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  endedVotedText: {
+    color: '#FFFFFF',
+  },
+  endedCommentCount: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  endedCommentText: {
+    color: '#A89483',
+    fontSize: 14,
   },
   chatListContent: {
     paddingTop: 42,
