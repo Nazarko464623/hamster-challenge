@@ -1,6 +1,7 @@
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
+import { useFonts } from 'expo-font';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
@@ -31,11 +32,22 @@ const WAVE_MOTION = {
 export default function CreateScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const [fontsLoaded, fontError] = useFonts({
+    NationalPark: require('../../assets/fonts/NationalPark-SemiBold.ttf'),
+  });
   const [title, setTitle] = useState('');
   const [rules, setRules] = useState('');
   const [category, setCategory] = useState<(typeof categories)[number] | null>(null);
   const [duration, setDuration] = useState<(typeof durations)[number] | null>(null);
   const [voting, setVoting] = useState<(typeof votingOptions)[number] | null>(null);
+
+  if (fontError) {
+    throw fontError;
+  }
+
+  if (!fontsLoaded) {
+    return null;
+  }
 
   return (
     <View style={styles.screen}>
@@ -43,11 +55,12 @@ export default function CreateScreen() {
       <WaveBackground />
 
       <ScrollView
+        style={styles.scrollView}
         contentContainerStyle={[
           styles.content,
           {
             paddingTop: Math.max(insets.top, 24) + 10,
-            paddingBottom: Math.max(insets.bottom, 24) + 28,
+            paddingBottom: 28,
           },
         ]}
         keyboardShouldPersistTaps="handled"
@@ -132,6 +145,14 @@ export default function CreateScreen() {
           </View>
         </View>
       </ScrollView>
+
+      <View style={[styles.createFooter, { paddingBottom: Math.max(insets.bottom, 24) + 8 }]}>
+        <Pressable
+          accessibilityRole="button"
+          style={({ pressed }) => [styles.createButton, pressed && styles.pressed]}>
+          <Text style={styles.createButtonText}>Create</Text>
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -299,6 +320,31 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingHorizontal: 24,
+  },
+  scrollView: {
+    flex: 1,
+  },
+  createFooter: {
+    paddingHorizontal: 24,
+    paddingTop: 10,
+  },
+  createButton: {
+    minHeight: 58,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 30,
+    backgroundColor: '#E9904D',
+    shadowColor: '#8D7967',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.18,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  createButtonText: {
+    color: '#FFFFFF',
+    fontFamily: 'NationalPark',
+    fontSize: 18,
+    letterSpacing: 0.3,
   },
   backButton: {
     width: 56,
