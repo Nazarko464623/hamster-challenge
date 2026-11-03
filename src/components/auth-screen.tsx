@@ -21,32 +21,54 @@ type AuthScreenProps = {
   mode: 'login' | 'signup';
 };
 
+type AuthField = 'nickname' | 'email' | 'password' | 'repeatedPassword';
+type AuthErrors = Partial<Record<AuthField, string>>;
+
 type AuthInputProps = {
   placeholder: string;
   keyboardType?: KeyboardTypeOptions;
   secureTextEntry?: boolean;
+  error?: string;
+  helperText?: string;
   onChangeText: (value: string) => void;
 };
 
-function AuthInput({ placeholder, keyboardType, secureTextEntry, onChangeText }: AuthInputProps) {
+function AuthInput({
+  placeholder,
+  keyboardType,
+  secureTextEntry,
+  error,
+  helperText,
+  onChangeText,
+}: AuthInputProps) {
   return (
-    <TextInput
-      accessibilityLabel={placeholder}
-      autoCapitalize="none"
-      keyboardType={keyboardType}
-      onChangeText={onChangeText}
-      placeholder={placeholder}
-      placeholderTextColor="#C5A988"
-      returnKeyType="next"
-      secureTextEntry={secureTextEntry}
-      style={[styles.input, styles.inputText]}
-    />
+    <View>
+      <TextInput
+        accessibilityLabel={placeholder}
+        autoCapitalize="none"
+        keyboardType={keyboardType}
+        onChangeText={onChangeText}
+        placeholder={placeholder}
+        placeholderTextColor="#C5A988"
+        returnKeyType="next"
+        secureTextEntry={secureTextEntry}
+        style={[styles.input, styles.inputText, error && styles.inputError]}
+      />
+      {error ? (
+        <Text accessibilityLiveRegion="polite" style={styles.errorText}>
+          {error}
+        </Text>
+      ) : helperText ? (
+        <Text style={styles.passwordHint}>{helperText}</Text>
+      ) : null}
+    </View>
   );
 }
 
 export function AuthScreen({ mode }: AuthScreenProps) {
   const isSignup = mode === 'signup';
   const [rememberMe, setRememberMe] = useState(false);
+  const [hasSubmitted, setHasSubmitted] = useState(false);
   const [fields, setFields] = useState({
     nickname: '',
     email: '',
@@ -59,6 +81,30 @@ export function AuthScreen({ mode }: AuthScreenProps) {
   const updateField = (field: keyof typeof fields) => (value: string) => {
     setFields((currentFields) => ({ ...currentFields, [field]: value }));
   };
+  const getValidationErrors = (): AuthErrors => {
+    const errors: AuthErrors = {};
+    if (isSignup && !fields.nickname.trim()) {
+      errors.nickname = 'Nickname is required.';
+    }
+    if (!fields.email.trim()) {
+      errors.email = 'Email is required.';
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(fields.email.trim())) {
+      errors.email = 'Enter a valid email address.';
+    }
+    if (!fields.password) {
+      errors.password = 'Password is required.';
+    } else if (fields.password.length < 8 || !/\d/.test(fields.password)) {
+      errors.password = 'Password does not meet the requirements.';
+    }
+    if (isSignup && !fields.repeatedPassword) {
+      errors.repeatedPassword = 'Please repeat your password.';
+    } else if (isSignup && fields.repeatedPassword !== fields.password) {
+      errors.repeatedPassword = 'Passwords do not match.';
+    }
+    return errors;
+  };
+  const validationErrors = hasSubmitted ? getValidationErrors() : {};
+  const hasValidationErrors = Object.keys(validationErrors).length > 0;
   const dismiss = () => {
     if (router.canGoBack()) {
       router.back();
@@ -68,6 +114,10 @@ export function AuthScreen({ mode }: AuthScreenProps) {
   };
   const handleNext = () => {
     Keyboard.dismiss();
+    setHasSubmitted(true);
+    if (Object.keys(getValidationErrors()).length > 0) {
+      return;
+    }
     router.replace({
       pathname: '/feed',
       params: {
@@ -125,25 +175,33 @@ export function AuthScreen({ mode }: AuthScreenProps) {
 
           {isSignup ? (
             <>
-              <View style={styles.signupFields}>
-                <AuthInput placeholder="nickname" onChangeText={updateField('nickname')} />
+              <View
+                style={[
+                  styles.signupFields,
+                  hasValidationErrors && styles.signupFieldsWithErrors,
+                ]}>
+                <AuthInput
+                  placeholder="nickname"
+                  error={validationErrors.nickname}
+                  onChangeText={updateField('nickname')}
+                />
                 <AuthInput
                   placeholder="email"
                   keyboardType="email-address"
+                  error={validationErrors.email}
                   onChangeText={updateField('email')}
                 />
-                <View>
-                  <AuthInput
-                    placeholder="password"
-                    secureTextEntry
-                    onChangeText={updateField('password')}
-                  />
-                  <Text style={styles.passwordHint}>at least 8 characters</Text>
-                  <Text style={styles.passwordHint}>at least 1 digit (0-9)</Text>
-                </View>
+                <AuthInput
+                  placeholder="password"
+                  secureTextEntry
+                  error={validationErrors.password}
+                  helperText={'at least 8 characters\nat least 1 digit (0-9)'}
+                  onChangeText={updateField('password')}
+                />
                 <AuthInput
                   placeholder="repeat password"
                   secureTextEntry
+                  error={validationErrors.repeatedPassword}
                   onChangeText={updateField('repeatedPassword')}
                 />
               </View>
@@ -154,11 +212,13 @@ export function AuthScreen({ mode }: AuthScreenProps) {
               <AuthInput
                 placeholder="email"
                 keyboardType="email-address"
+                error={validationErrors.email}
                 onChangeText={updateField('email')}
               />
               <AuthInput
                 placeholder="password"
                 secureTextEntry
+                error={validationErrors.password}
                 onChangeText={updateField('password')}
               />
               {rememberMeRow}
@@ -232,6 +292,9 @@ const styles = StyleSheet.create({
     width: '80%',
     gap: 25,
   },
+  signupFieldsWithErrors: {
+    gap: 8,
+  },
   loginFields: {
     position: 'absolute',
     top: '17.5%',
@@ -251,8 +314,19 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
     elevation: 2,
   },
+  inputError: {
+    borderBottomColor: '#FF2D2D',
+    borderBottomWidth: 2,
+  },
   inputText: {
     color: '#E9803F',
+  },
+  errorText: {
+    marginTop: 4,
+    marginLeft: 10,
+    color: '#FF2D2D',
+    fontSize: 14,
+    lineHeight: 18,
   },
   passwordHint: {
     marginLeft: 16,
