@@ -1,0 +1,199 @@
+import { useRouter } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
+import { useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+const challengeTypes = [
+	{ id: 'quick', title: 'Quick challenge', description: 'Start now and play a short round', icon: '?' },
+	{ id: 'daily', title: 'Daily challenge', description: 'Keep the competition going all day', icon: '?' },
+	{ id: 'custom', title: 'Custom challenge', description: 'Choose your own rules and time', icon: '?' },
+] as const;
+
+export default function CreateScreen() {
+	const router = useRouter();
+	const insets = useSafeAreaInsets();
+	const [selectedType, setSelectedType] = useState('quick');
+	const [title, setTitle] = useState('');
+
+	return (
+		<View style={styles.screen}>
+			<StatusBar hidden />
+			<ScrollView
+				contentContainerStyle={[styles.content, { paddingTop: Math.max(insets.top, 22) }]}
+				showsVerticalScrollIndicator={false}
+			>
+				<View style={styles.header}>
+					<Pressable
+						accessibilityLabel="Go back"
+						accessibilityRole="button"
+						onPress={() => router.back()}
+						style={styles.backButton}
+					>
+						<Text style={styles.backText}>‹</Text>
+					</Pressable>
+					<Text style={styles.headerTitle}>Create</Text>
+					<View style={styles.headerSpacer} />
+				</View>
+				<View style={styles.hero}>
+					<View style={styles.heroIcon}>
+						<Text style={styles.heroIconText}>+</Text>
+					</View>
+					<View style={styles.heroCopy}>
+						<Text style={styles.title}>Make it happen</Text>
+						<Text style={styles.subtitle}>Create a challenge and invite your friends to play.</Text>
+					</View>
+				</View>
+				<Text style={styles.sectionTitle}>Choose a challenge</Text>
+				<View style={styles.typeList}>
+					{challengeTypes.map((type) => {
+						const selected = type.id === selectedType;
+						return (
+							<Pressable
+								key={type.id}
+								accessibilityRole="button"
+								accessibilityState={{ selected }}
+								onPress={() => setSelectedType(type.id)}
+								style={[styles.typeCard, selected && styles.selectedTypeCard]}
+							>
+								<View style={[styles.typeIcon, selected && styles.selectedTypeIcon]}>
+									<Text style={styles.typeIconText}>{type.icon}</Text>
+								</View>
+								<View style={styles.typeCopy}>
+									<Text style={styles.typeTitle}>{type.title}</Text>
+									<Text style={styles.typeDescription}>{type.description}</Text>
+								</View>
+								<View style={[styles.radio, selected && styles.selectedRadio]}>
+									{selected && <View style={styles.radioDot} />}
+								</View>
+							</Pressable>
+						);
+					})}
+				</View>
+				<View style={styles.detailsHeader}>
+					<Text style={styles.sectionTitle}>Challenge details</Text>
+					<Text style={styles.optional}>Optional</Text>
+				</View>
+				<TextInput
+					accessibilityLabel="Challenge name"
+					onChangeText={setTitle}
+					placeholder="Give it a name"
+					placeholderTextColor="#B9A58E"
+					style={styles.input}
+					value={title}
+				/>
+				<Pressable
+					accessibilityRole="button"
+					onPress={() => router.back()}
+					style={({ pressed }) => [styles.createButton, pressed && styles.pressed]}
+				>
+					<Text style={styles.createButtonText}>Create challenge</Text>
+					<Text style={styles.createButtonArrow}>?</Text>
+				</Pressable>
+			</ScrollView>
+		</View>
+	);
+}
+
+const styles = StyleSheet.create({
+	screen: { backgroundColor: '#FFF8EF', flex: 1 },
+	content: { paddingBottom: 36, paddingHorizontal: 20 },
+	header: { alignItems: 'center', flexDirection: 'row', height: 48 },
+	backButton: { alignItems: 'center', height: 44, justifyContent: 'center', width: 44 },
+	backText: { color: '#3C3027', fontSize: 38, fontWeight: '300' },
+	headerTitle: {
+		color: '#3C3027',
+		flex: 1,
+		fontSize: 18,
+		fontWeight: '700',
+		textAlign: 'center',
+	},
+	headerSpacer: { width: 44 },
+	hero: {
+		alignItems: 'center',
+		backgroundColor: '#FCE4C9',
+		borderRadius: 24,
+		flexDirection: 'row',
+		marginTop: 28,
+		padding: 20,
+	},
+	heroIcon: {
+		alignItems: 'center',
+		backgroundColor: '#F98C3E',
+		borderRadius: 18,
+		height: 58,
+		justifyContent: 'center',
+		width: 58,
+	},
+	heroIconText: { color: '#FFFFFF', fontSize: 34 },
+	heroCopy: { flex: 1, marginLeft: 16 },
+	title: { color: '#3C3027', fontSize: 24, fontWeight: '800' },
+	subtitle: { color: '#8E7966', fontSize: 14, lineHeight: 20, marginTop: 5 },
+	sectionTitle: { color: '#3C3027', fontSize: 18, fontWeight: '800', marginTop: 28 },
+	typeList: { gap: 10, marginTop: 14 },
+	typeCard: {
+		alignItems: 'center',
+		backgroundColor: '#FFFFFF',
+		borderColor: '#F0DCC6',
+		borderRadius: 18,
+		borderWidth: 1,
+		flexDirection: 'row',
+		padding: 13,
+	},
+	selectedTypeCard: {
+		backgroundColor: '#FFF1E2',
+		borderColor: '#F98C3E',
+		borderWidth: 2,
+		padding: 12,
+	},
+	typeIcon: {
+		alignItems: 'center',
+		backgroundColor: '#FFF1E2',
+		borderRadius: 13,
+		height: 44,
+		justifyContent: 'center',
+		width: 44,
+	},
+	selectedTypeIcon: { backgroundColor: '#F98C3E' },
+	typeIconText: { fontSize: 20 },
+	typeCopy: { flex: 1, marginLeft: 12 },
+	typeTitle: { color: '#3C3027', fontSize: 15, fontWeight: '800' },
+	typeDescription: { color: '#9B8774', fontSize: 12, marginTop: 3 },
+	radio: {
+		alignItems: 'center',
+		borderColor: '#D5C2AE',
+		borderRadius: 10,
+		borderWidth: 2,
+		height: 20,
+		justifyContent: 'center',
+		marginLeft: 8,
+		width: 20,
+	},
+	selectedRadio: { borderColor: '#F98C3E' },
+	radioDot: { backgroundColor: '#F98C3E', borderRadius: 5, height: 10, width: 10 },
+	detailsHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
+	optional: { color: '#B9A58E', fontSize: 12, marginTop: 28 },
+	input: {
+		backgroundColor: '#FFFFFF',
+		borderColor: '#F0DCC6',
+		borderRadius: 16,
+		borderWidth: 1,
+		color: '#3C3027',
+		fontSize: 16,
+		marginTop: 14,
+		minHeight: 54,
+		paddingHorizontal: 18,
+	},
+	createButton: {
+		alignItems: 'center',
+		backgroundColor: '#F98C3E',
+		borderRadius: 18,
+		flexDirection: 'row',
+		justifyContent: 'center',
+		marginTop: 28,
+		minHeight: 58,
+	},
+	createButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '800' },
+	createButtonArrow: { color: '#FFFFFF', fontSize: 23, marginLeft: 12 },
+	pressed: { opacity: 0.8 },
+});

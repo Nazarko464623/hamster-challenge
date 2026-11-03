@@ -1,5 +1,5 @@
 import { SymbolView } from 'expo-symbols';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -68,10 +68,16 @@ export default function FeedScreen() {
   const [chatMessages, setChatMessages] = useState(initialChatMessages);
   const [chatDraft, setChatDraft] = useState('');
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const { nickname } = useLocalSearchParams<{ nickname?: string }>();
   const displayName = typeof nickname === 'string' && nickname.trim() ? nickname.trim() : 'Player';
 
   const handleTabPress = (tabId: FeedTabId) => {
+    if (tabId === 'create') {
+      router.push('/create' as never);
+      return;
+    }
+
     setActiveTab(tabId);
     if (tabId !== 'messages') {
       setSelectedChatId(null);
