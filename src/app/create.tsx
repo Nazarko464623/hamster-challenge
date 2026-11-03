@@ -1,199 +1,412 @@
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Animated, {
+  Easing,
+  interpolate,
+  useAnimatedStyle,
+  useSharedValue,
+  useReducedMotion,
+  withRepeat,
+  withTiming,
+} from 'react-native-reanimated';
+import Svg, { Path } from 'react-native-svg';
 
-const challengeTypes = [
-	{ id: 'quick', title: 'Quick challenge', description: 'Start now and play a short round', icon: '?' },
-	{ id: 'daily', title: 'Daily challenge', description: 'Keep the competition going all day', icon: '?' },
-	{ id: 'custom', title: 'Custom challenge', description: 'Choose your own rules and time', icon: '?' },
-] as const;
+const categories = ['sport', 'photo', 'art', 'music', 'gaming', 'food', 'other'] as const;
+const durations = ['1 day', '3 days', 'week'] as const;
+const votingOptions = ['everyone', 'followers'] as const;
+
+// Increase duration for slower motion; distance, rotation, and scale control intensity.
+const WAVE_MOTION = {
+  topBase: { duration: 12_000, distance: 14, rotation: 1.1, scale: 1.025, direction: 1 },
+  topPeach: { duration: 9_000, distance: 18, rotation: 1.3, scale: 1.04, direction: 1 },
+  topOrange: { duration: 14_000, distance: 16, rotation: 1.2, scale: 1.035, direction: 1 },
+  bottomBase: { duration: 19_000, distance: 14, rotation: 1, scale: 1.03, direction: -1 },
+  bottomPeach: { duration: 17_000, distance: 13, rotation: 1, scale: 1.025, direction: -1 },
+  bottomOrange: { duration: 10_000, distance: 18, rotation: 1.3, scale: 1.04, direction: -1 },
+} as const;
 
 export default function CreateScreen() {
-	const router = useRouter();
-	const insets = useSafeAreaInsets();
-	const [selectedType, setSelectedType] = useState('quick');
-	const [title, setTitle] = useState('');
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const [title, setTitle] = useState('');
+  const [rules, setRules] = useState('');
+  const [category, setCategory] = useState<(typeof categories)[number] | null>(null);
+  const [duration, setDuration] = useState<(typeof durations)[number] | null>(null);
+  const [voting, setVoting] = useState<(typeof votingOptions)[number] | null>(null);
 
-	return (
-		<View style={styles.screen}>
-			<StatusBar hidden />
-			<ScrollView
-				contentContainerStyle={[styles.content, { paddingTop: Math.max(insets.top, 22) }]}
-				showsVerticalScrollIndicator={false}
-			>
-				<View style={styles.header}>
-					<Pressable
-						accessibilityLabel="Go back"
-						accessibilityRole="button"
-						onPress={() => router.back()}
-						style={styles.backButton}
-					>
-						<Text style={styles.backText}>‹</Text>
-					</Pressable>
-					<Text style={styles.headerTitle}>Create</Text>
-					<View style={styles.headerSpacer} />
-				</View>
-				<View style={styles.hero}>
-					<View style={styles.heroIcon}>
-						<Text style={styles.heroIconText}>+</Text>
-					</View>
-					<View style={styles.heroCopy}>
-						<Text style={styles.title}>Make it happen</Text>
-						<Text style={styles.subtitle}>Create a challenge and invite your friends to play.</Text>
-					</View>
-				</View>
-				<Text style={styles.sectionTitle}>Choose a challenge</Text>
-				<View style={styles.typeList}>
-					{challengeTypes.map((type) => {
-						const selected = type.id === selectedType;
-						return (
-							<Pressable
-								key={type.id}
-								accessibilityRole="button"
-								accessibilityState={{ selected }}
-								onPress={() => setSelectedType(type.id)}
-								style={[styles.typeCard, selected && styles.selectedTypeCard]}
-							>
-								<View style={[styles.typeIcon, selected && styles.selectedTypeIcon]}>
-									<Text style={styles.typeIconText}>{type.icon}</Text>
-								</View>
-								<View style={styles.typeCopy}>
-									<Text style={styles.typeTitle}>{type.title}</Text>
-									<Text style={styles.typeDescription}>{type.description}</Text>
-								</View>
-								<View style={[styles.radio, selected && styles.selectedRadio]}>
-									{selected && <View style={styles.radioDot} />}
-								</View>
-							</Pressable>
-						);
-					})}
-				</View>
-				<View style={styles.detailsHeader}>
-					<Text style={styles.sectionTitle}>Challenge details</Text>
-					<Text style={styles.optional}>Optional</Text>
-				</View>
-				<TextInput
-					accessibilityLabel="Challenge name"
-					onChangeText={setTitle}
-					placeholder="Give it a name"
-					placeholderTextColor="#B9A58E"
-					style={styles.input}
-					value={title}
-				/>
-				<Pressable
-					accessibilityRole="button"
-					onPress={() => router.back()}
-					style={({ pressed }) => [styles.createButton, pressed && styles.pressed]}
-				>
-					<Text style={styles.createButtonText}>Create challenge</Text>
-					<Text style={styles.createButtonArrow}>?</Text>
-				</Pressable>
-			</ScrollView>
-		</View>
-	);
+  return (
+    <View style={styles.screen}>
+      <StatusBar hidden />
+      <WaveBackground />
+
+      <ScrollView
+        contentContainerStyle={[
+          styles.content,
+          {
+            paddingTop: Math.max(insets.top, 24) + 10,
+            paddingBottom: Math.max(insets.bottom, 24) + 28,
+          },
+        ]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}>
+        <Pressable
+          accessibilityLabel="Go back"
+          accessibilityRole="button"
+          onPress={() => router.back()}
+          style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}>
+          <Text style={styles.backText}>â€¹</Text>
+        </Pressable>
+
+        <Text style={styles.screenTitle}>Creating Battle</Text>
+
+        <View style={styles.fieldSection}>
+          <Text style={styles.sectionLabel}>Title</Text>
+          <TextInput
+            accessibilityLabel="Battle title"
+            onChangeText={setTitle}
+            placeholder="enter your title"
+            placeholderTextColor="#B9A58E"
+            style={styles.titleInput}
+            value={title}
+          />
+        </View>
+
+        <View style={styles.fieldSection}>
+          <Text style={styles.sectionLabel}>Category</Text>
+          <View style={styles.optionGrid}>
+            {categories.map((option) => (
+              <OptionPill
+                key={option}
+                label={option}
+                selected={category === option}
+                onPress={() => setCategory(option)}
+              />
+            ))}
+          </View>
+        </View>
+
+        <View style={styles.fieldSection}>
+          <Text style={styles.sectionLabel}>Rules</Text>
+          <TextInput
+            accessibilityLabel="Battle rules"
+            multiline
+            onChangeText={setRules}
+            placeholder="what should people submit?"
+            placeholderTextColor="#B9A58E"
+            style={styles.rulesInput}
+            textAlignVertical="top"
+            value={rules}
+          />
+        </View>
+
+        <View style={styles.fieldSection}>
+          <Text style={styles.sectionLabel}>Runs for</Text>
+          <View style={styles.optionRow}>
+            {durations.map((option) => (
+              <OptionPill
+                key={option}
+                label={option}
+                selected={duration === option}
+                onPress={() => setDuration(option)}
+                style={styles.durationPill}
+              />
+            ))}
+          </View>
+        </View>
+
+        <View style={styles.fieldSection}>
+          <Text style={styles.sectionLabel}>Who can vote</Text>
+          <View style={styles.optionRow}>
+            {votingOptions.map((option) => (
+              <OptionPill
+                key={option}
+                label={option}
+                selected={voting === option}
+                onPress={() => setVoting(option)}
+                style={styles.votingPill}
+              />
+            ))}
+          </View>
+        </View>
+      </ScrollView>
+    </View>
+  );
+}
+
+function WaveBackground() {
+  return (
+    <View pointerEvents="none" style={styles.backgroundWaves}>
+      <AnimatedWaveLayer
+        path="M0 0h402v18c-48 21-62 54-122 53-61-1-77-38-137-27C74 54 37 96 0 109V0Z"
+        fill="#F9DFC9"
+        motion={WAVE_MOTION.topBase}
+      />
+      <AnimatedWaveLayer
+        path="M0 0h282c-37 34-65 59-115 79C96 94 43 90 0 142V0Z"
+        fill="#EFA96F"
+        motion={WAVE_MOTION.topPeach}
+      />
+      <AnimatedWaveLayer
+        path="M0 0h402v25c-37 22-65 54-122 49C216 69 192 29 136 40 77 51 35 102 0 128V0Z"
+        fill="#E9904D"
+        motion={WAVE_MOTION.topOrange}
+      />
+      <AnimatedWaveLayer
+        path="M0 698c45 27 81 20 130 12 53-8 78-12 126 1 54 15 83 21 146-8v171H0V698Z"
+        fill="#F3C39B"
+        motion={WAVE_MOTION.bottomBase}
+      />
+      <AnimatedWaveLayer
+        path="M0 748c44-12 68-43 114-44 53-2 86 43 145 38 59-6 79-47 143-43v175H0V748Z"
+        fill="#EBAA72"
+        motion={WAVE_MOTION.bottomOrange}
+      />
+      <AnimatedWaveLayer
+        path="M0 796c64-13 101-26 159-17 63 10 101 35 155 21 34-9 58-26 88-29v103H0V796Z"
+        fill="#F7D8BF"
+        motion={WAVE_MOTION.bottomPeach}
+      />
+    </View>
+  );
+}
+
+function AnimatedWaveLayer({
+  path,
+  fill,
+  motion,
+}: {
+  path: string;
+  fill: string;
+  motion: (typeof WAVE_MOTION)[keyof typeof WAVE_MOTION];
+}) {
+  const reduceMotion = useReducedMotion();
+  const progress = useSharedValue(0);
+
+  useEffect(() => {
+    if (reduceMotion) {
+      return;
+    }
+
+    progress.value = withRepeat(
+      withTiming(1, {
+        duration: motion.duration,
+        easing: Easing.inOut(Easing.sin),
+      }),
+      -1,
+      true
+    );
+  }, [motion.duration, progress, reduceMotion]);
+
+  const animatedStyle = useAnimatedStyle(() => {
+    const distance = reduceMotion ? 0 : motion.distance;
+    const verticalDistance = reduceMotion ? 0 : 2;
+    const rotation = reduceMotion ? 0 : motion.rotation;
+    const scale = reduceMotion ? 1 : motion.scale;
+
+    return {
+      transform: [
+        {
+          translateX: interpolate(
+            progress.value,
+            [0, 1],
+            [-distance * motion.direction, distance * motion.direction]
+          ),
+        },
+        {
+          translateY: interpolate(
+            progress.value,
+            [0, 1],
+            [-verticalDistance * motion.direction, verticalDistance * motion.direction]
+          ),
+        },
+        {
+          rotate: `${interpolate(
+            progress.value,
+            [0, 1],
+            [-rotation * motion.direction, rotation * motion.direction]
+          )}deg`,
+        },
+        { scale: interpolate(progress.value, [0, 1], [1, scale]) },
+      ],
+    };
+  });
+
+  return (
+    <Animated.View style={[styles.waveLayer, animatedStyle]}>
+      <Svg style={styles.waveSvg} viewBox="0 0 402 874" preserveAspectRatio="none">
+        <Path d={path} fill={fill} />
+      </Svg>
+    </Animated.View>
+  );
+}
+
+function OptionPill({
+  label,
+  selected,
+  onPress,
+  style,
+}: {
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+  style?: object;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected }}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.optionPill,
+        style,
+        selected && styles.selectedOptionPill,
+        pressed && styles.pressed,
+      ]}>
+      <Text style={[styles.optionText, selected && styles.selectedOptionText]}>{label}</Text>
+    </Pressable>
+  );
 }
 
 const styles = StyleSheet.create({
-	screen: { backgroundColor: '#FFF8EF', flex: 1 },
-	content: { paddingBottom: 36, paddingHorizontal: 20 },
-	header: { alignItems: 'center', flexDirection: 'row', height: 48 },
-	backButton: { alignItems: 'center', height: 44, justifyContent: 'center', width: 44 },
-	backText: { color: '#3C3027', fontSize: 38, fontWeight: '300' },
-	headerTitle: {
-		color: '#3C3027',
-		flex: 1,
-		fontSize: 18,
-		fontWeight: '700',
-		textAlign: 'center',
-	},
-	headerSpacer: { width: 44 },
-	hero: {
-		alignItems: 'center',
-		backgroundColor: '#FCE4C9',
-		borderRadius: 24,
-		flexDirection: 'row',
-		marginTop: 28,
-		padding: 20,
-	},
-	heroIcon: {
-		alignItems: 'center',
-		backgroundColor: '#F98C3E',
-		borderRadius: 18,
-		height: 58,
-		justifyContent: 'center',
-		width: 58,
-	},
-	heroIconText: { color: '#FFFFFF', fontSize: 34 },
-	heroCopy: { flex: 1, marginLeft: 16 },
-	title: { color: '#3C3027', fontSize: 24, fontWeight: '800' },
-	subtitle: { color: '#8E7966', fontSize: 14, lineHeight: 20, marginTop: 5 },
-	sectionTitle: { color: '#3C3027', fontSize: 18, fontWeight: '800', marginTop: 28 },
-	typeList: { gap: 10, marginTop: 14 },
-	typeCard: {
-		alignItems: 'center',
-		backgroundColor: '#FFFFFF',
-		borderColor: '#F0DCC6',
-		borderRadius: 18,
-		borderWidth: 1,
-		flexDirection: 'row',
-		padding: 13,
-	},
-	selectedTypeCard: {
-		backgroundColor: '#FFF1E2',
-		borderColor: '#F98C3E',
-		borderWidth: 2,
-		padding: 12,
-	},
-	typeIcon: {
-		alignItems: 'center',
-		backgroundColor: '#FFF1E2',
-		borderRadius: 13,
-		height: 44,
-		justifyContent: 'center',
-		width: 44,
-	},
-	selectedTypeIcon: { backgroundColor: '#F98C3E' },
-	typeIconText: { fontSize: 20 },
-	typeCopy: { flex: 1, marginLeft: 12 },
-	typeTitle: { color: '#3C3027', fontSize: 15, fontWeight: '800' },
-	typeDescription: { color: '#9B8774', fontSize: 12, marginTop: 3 },
-	radio: {
-		alignItems: 'center',
-		borderColor: '#D5C2AE',
-		borderRadius: 10,
-		borderWidth: 2,
-		height: 20,
-		justifyContent: 'center',
-		marginLeft: 8,
-		width: 20,
-	},
-	selectedRadio: { borderColor: '#F98C3E' },
-	radioDot: { backgroundColor: '#F98C3E', borderRadius: 5, height: 10, width: 10 },
-	detailsHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
-	optional: { color: '#B9A58E', fontSize: 12, marginTop: 28 },
-	input: {
-		backgroundColor: '#FFFFFF',
-		borderColor: '#F0DCC6',
-		borderRadius: 16,
-		borderWidth: 1,
-		color: '#3C3027',
-		fontSize: 16,
-		marginTop: 14,
-		minHeight: 54,
-		paddingHorizontal: 18,
-	},
-	createButton: {
-		alignItems: 'center',
-		backgroundColor: '#F98C3E',
-		borderRadius: 18,
-		flexDirection: 'row',
-		justifyContent: 'center',
-		marginTop: 28,
-		minHeight: 58,
-	},
-	createButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '800' },
-	createButtonArrow: { color: '#FFFFFF', fontSize: 23, marginLeft: 12 },
-	pressed: { opacity: 0.8 },
+  screen: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  backgroundWaves: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    width: '100%',
+    height: '100%',
+  },
+  waveLayer: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+  },
+  waveSvg: {
+    position: 'absolute',
+    left: '-10%',
+    width: '120%',
+    height: '100%',
+  },
+  content: {
+    paddingHorizontal: 24,
+  },
+  backButton: {
+    width: 56,
+    height: 56,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 28,
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#8D7967',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  backText: {
+    marginTop: -4,
+    color: '#76563F',
+    fontSize: 44,
+    fontWeight: '300',
+  },
+  screenTitle: {
+    marginTop: 16,
+    marginBottom: 38,
+    color: '#D9772D',
+    fontSize: 29,
+    fontWeight: '500',
+    textAlign: 'center',
+  },
+  fieldSection: {
+    marginBottom: 24,
+  },
+  sectionLabel: {
+    marginBottom: 10,
+    color: '#C77A3E',
+    fontSize: 17,
+    fontWeight: '500',
+    textAlign: 'center',
+  },
+  titleInput: {
+    minHeight: 54,
+    paddingHorizontal: 20,
+    borderRadius: 28,
+    backgroundColor: '#FFF2EB',
+    color: '#76563F',
+    fontSize: 15,
+    shadowColor: '#8D7967',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  optionGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  optionRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  optionPill: {
+    minHeight: 42,
+    minWidth: 76,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+    borderRadius: 24,
+    backgroundColor: '#FFF2EB',
+    shadowColor: '#8D7967',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  selectedOptionPill: {
+    backgroundColor: '#E9904D',
+  },
+  optionText: {
+    color: '#B9A58E',
+    fontSize: 15,
+  },
+  selectedOptionText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  rulesInput: {
+    minHeight: 116,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    borderRadius: 24,
+    backgroundColor: '#FFF2EB',
+    color: '#76563F',
+    fontSize: 15,
+    shadowColor: '#8D7967',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  durationPill: {
+    flex: 1,
+  },
+  votingPill: {
+    flex: 1,
+  },
+  pressed: {
+    opacity: 0.8,
+  },
 });
