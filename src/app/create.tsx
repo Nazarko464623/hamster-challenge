@@ -1,4 +1,4 @@
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import { useFonts } from 'expo-font';
@@ -14,6 +14,8 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import Svg, { Path } from 'react-native-svg';
+
+import { saveCreatedBattle, type UserBattle } from '@/lib/battles';
 
 const categories = ['sport', 'photo', 'art', 'music', 'gaming', 'food', 'other'] as const;
 const durations = ['1 day', '3 days', 'week'] as const;
@@ -31,6 +33,7 @@ const WAVE_MOTION = {
 
 export default function CreateScreen() {
   const router = useRouter();
+  const { nickname } = useLocalSearchParams<{ nickname?: string }>();
   const insets = useSafeAreaInsets();
   const [fontsLoaded, fontError] = useFonts({
     NationalPark: require('../../assets/fonts/NationalPark-SemiBold.ttf'),
@@ -40,6 +43,40 @@ export default function CreateScreen() {
   const [category, setCategory] = useState<(typeof categories)[number] | null>(null);
   const [duration, setDuration] = useState<(typeof durations)[number] | null>(null);
   const [voting, setVoting] = useState<(typeof votingOptions)[number] | null>(null);
+
+  const createBattle = async () => {
+    const owner = typeof nickname === 'string' && nickname.trim() ? nickname.trim() : 'Player';
+    if (!title.trim() || !category || !duration || !voting) {
+      return;
+    }
+
+    const categoryIcons: Record<(typeof categories)[number], string> = {
+      sport: '🏀',
+      photo: '📷',
+      art: '🎨',
+      music: '🎵',
+      gaming: '🎮',
+      food: '🍔',
+      other: '✨',
+    };
+    const battle: UserBattle = {
+      id: `created-${Date.now()}`,
+      owner,
+      title: title.trim(),
+      category: category[0].toUpperCase() + category.slice(1),
+      icon: categoryIcons[category],
+      rules: rules.trim(),
+      time: duration,
+      players: 0,
+      score: 0,
+      rank: 0,
+      status: 'live',
+      createdAt: new Date().toISOString(),
+    };
+
+    await saveCreatedBattle(owner, battle);
+    router.replace({ pathname: '/feed', params: { nickname: owner } });
+  };
 
   if (fontError) {
     throw fontError;
@@ -149,7 +186,14 @@ export default function CreateScreen() {
       <View style={[styles.createFooter, { paddingBottom: Math.max(insets.bottom, 24) + 8 }]}>
         <Pressable
           accessibilityRole="button"
-          style={({ pressed }) => [styles.createButton, pressed && styles.pressed]}>
+          accessibilityLabel="Create battle"
+          disabled={!title.trim() || !category || !duration || !voting}
+          onPress={createBattle}
+          style={({ pressed }) => [
+            styles.createButton,
+            (!title.trim() || !category || !duration || !voting) && styles.disabledCreateButton,
+            pressed && styles.pressed,
+          ]}>
           <Text style={styles.createButtonText}>Create</Text>
         </Pressable>
       </View>
@@ -339,6 +383,11 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.18,
     shadowRadius: 6,
     elevation: 4,
+  },
+  disabledCreateButton: {
+    backgroundColor: '#D6C8BD',
+    shadowOpacity: 0,
+    elevation: 0,
   },
   createButtonText: {
     color: '#FFFFFF',
