@@ -1,10 +1,12 @@
 import { SymbolView } from 'expo-symbols';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useState, type ComponentProps } from 'react';
+import { useEffect, useState, type ComponentProps } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path } from 'react-native-svg';
+
+import { getMineData, setBattlePinned, type UserBattle } from '@/lib/battles';
 
 const feedTabs = [
   {
@@ -32,7 +34,7 @@ const feedTabs = [
 ] as const;
 
 type FeedTabId = (typeof feedTabs)[number]['id'];
-type BattleStatus = 'live' | 'ended';
+type BattleStatus = 'live' | 'ended' | 'mine';
 type BattleCategory = 'All' | 'Sports' | 'Art' | 'Photo';
 
 const battleCategories: BattleCategory[] = ['All', 'Sports', 'Art', 'Photo'];
@@ -140,14 +142,29 @@ export default function FeedScreen() {
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [chatMessages, setChatMessages] = useState(initialChatMessages);
   const [chatDraft, setChatDraft] = useState('');
+  const [pinnedBattleIds, setPinnedBattleIds] = useState<string[]>([]);
+  const [createdBattles, setCreatedBattles] = useState<UserBattle[]>([]);
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { nickname } = useLocalSearchParams<{ nickname?: string }>();
   const displayName = typeof nickname === 'string' && nickname.trim() ? nickname.trim() : 'Player';
 
+  useEffect(() => {
+    let active = true;
+    getMineData(displayName).then((data) => {
+      if (active) {
+        setPinnedBattleIds(data.pinnedIds);
+        setCreatedBattles(data.createdBattles);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [displayName]);
+
   const handleTabPress = (tabId: FeedTabId) => {
     if (tabId === 'create') {
-      router.push('/create' as never);
+      router.push({ pathname: '/create', params: { nickname: displayName } });
       return;
     }
 
@@ -196,6 +213,14 @@ export default function FeedScreen() {
           topInset={insets.top}
           status={battleStatus}
           onStatusChange={setBattleStatus}
+          pinnedBattleIds={pinnedBattleIds}
+          createdBattles={createdBattles}
+          onTogglePin={async (battleId, pinned) => {
+            setPinnedBattleIds((current) =>
+              pinned ? [...new Set([...current, battleId])] : current.filter((id) => id !== battleId)
+            );
+            await setBattlePinned(displayName, battleId, pinned);
+          }}
         />
       )}
 
@@ -349,16 +374,25 @@ function HomeContent({
   topInset,
   status,
   onStatusChange,
+  pinnedBattleIds,
+  createdBattles,
+  onTogglePin,
 }: {
   topInset: number;
   status: BattleStatus;
   onStatusChange: (status: BattleStatus) => void;
+  pinnedBattleIds: string[];
+  createdBattles: UserBattle[];
+  onTogglePin: (battleId: string, pinned: boolean) => void;
 }) {
   const [selectedCategory, setSelectedCategory] = useState<BattleCategory>('All');
   const visibleLiveBattles =
     selectedCategory === 'All'
       ? liveBattles
       : liveBattles.filter((battle) => battle.category === selectedCategory);
+  const mineLiveBattles = liveBattles.filter((battle) => pinnedBattleIds.includes(battle.id));
+  const mineEndedGames = endedGames.filter((game) => pinnedBattleIds.includes(game.id));
+  const mineBattlesCount = mineLiveBattles.length + mineEndedGames.length + createdBattles.length;
 
   return (
     <ScrollView
@@ -376,14 +410,14 @@ function HomeContent({
       </View>
 
       <View style={styles.battleFilters}>
-        {(['live', 'ended'] as const).map((filter) => {
+        {(['live', 'ended', 'mine'] as const).map((filter) => {
           const selected = status === filter;
-          const title = filter === 'live' ? 'Live' : 'Ended';
+          const title = filter === 'live' ? 'Live' : filter === 'ended' ? 'Ended' : 'Mine';
           return (
             <Pressable
               key={filter}
               accessibilityRole="button"
-              accessibilityLabel={filter === 'live' ? 'Live games' : 'Ended games'}
+              accessibilityLabel={`${title} battles`}
               accessibilityState={{ selected }}
               onPress={() => onStatusChange(filter)}
               style={[styles.battleFilter, selected && styles.selectedBattleFilter]}>
@@ -401,6 +435,12 @@ function HomeContent({
 
       {status === 'live' && (
         <View style={styles.featuredBattle}>
+          <PinButton
+            pinned={pinnedBattleIds.includes('pixel-level-live')}
+            onPress={() =>
+              onTogglePin('pixel-level-live', !pinnedBattleIds.includes('pixel-level-live'))
+            }
+          />
           <Text style={styles.featuredBattleIcon}>⚡</Text>
           <View style={styles.featuredBattleDetails}>
             <Text style={styles.featuredBattleTitle}>Daily battle</Text>
@@ -443,6 +483,10 @@ function HomeContent({
 
       {status === 'live' && visibleLiveBattles.map((battle) => (
         <View key={battle.id} style={styles.battleCard}>
+          <PinButton
+            pinned={pinnedBattleIds.includes(battle.id)}
+            onPress={() => onTogglePin(battle.id, !pinnedBattleIds.includes(battle.id))}
+          />
           <View style={styles.battleCategory}>
             <Text style={styles.battleCategoryIcon}>{battle.icon}</Text>
             <Text style={styles.battleCategoryText}>{battle.category}</Text>
@@ -465,16 +509,64 @@ function HomeContent({
         </View>
       ))}
       {status === 'ended' &&
-        endedGames.map((game) => <EndedGameCard key={game.id} game={game} />)}
+        endedGames.map((game) => (
+          <EndedGameCard
+            key={game.id}
+            game={game}
+            pinned={pinnedBattleIds.includes(game.id)}
+            onTogglePin={onTogglePin}
+          />
+        ))}
+      {status === 'mine' && mineBattlesCount === 0 && (
+        <View style={styles.emptyMineCard}>
+          <Text style={styles.emptyMineIcon}>📌</Text>
+          <Text style={styles.emptyMineTitle}>Your Mine is empty</Text>
+          <Text style={styles.emptyMineText}>Pin battles you want to find quickly, or create your own.</Text>
+        </View>
+      )}
+      {status === 'mine' && mineLiveBattles.map((battle) => (
+        <View key={battle.id} style={styles.battleCard}>
+          <PinButton pinned onPress={() => onTogglePin(battle.id, false)} />
+          <View style={styles.battleCategory}>
+            <Text style={styles.battleCategoryIcon}>{battle.icon}</Text>
+            <Text style={styles.battleCategoryText}>{battle.category}</Text>
+          </View>
+          <Text style={styles.battleTitle}>{battle.title}</Text>
+          <View style={styles.battleMeta}>
+            <Text style={styles.battleMetaText}>◷ {battle.time}</Text>
+            <Text style={styles.battleMetaText}>{battle.players} players</Text>
+          </View>
+        </View>
+      ))}
+      {status === 'mine' && mineEndedGames.map((game) => (
+        <EndedGameCard
+          key={game.id}
+          game={game}
+          pinned
+          onTogglePin={onTogglePin}
+        />
+      ))}
+      {status === 'mine' && createdBattles.map((battle) => (
+        <CreatedBattleCard key={battle.id} battle={battle} onTogglePin={onTogglePin} />
+      ))}
     </ScrollView>
   );
 }
 
-function EndedGameCard({ game }: { game: (typeof endedGames)[number] }) {
+function EndedGameCard({
+  game,
+  pinned,
+  onTogglePin,
+}: {
+  game: (typeof endedGames)[number];
+  pinned: boolean;
+  onTogglePin: (battleId: string, pinned: boolean) => void;
+}) {
   const [hasVoted, setHasVoted] = useState(false);
 
   return (
     <View style={styles.endedGameCard}>
+      <PinButton pinned={pinned} onPress={() => onTogglePin(game.id, !pinned)} />
       <View style={styles.endedAuthorRow}>
         <View style={styles.endedAvatar}>
           <Text style={styles.endedAvatarText}>
@@ -522,6 +614,44 @@ function EndedGameCard({ game }: { game: (typeof endedGames)[number] }) {
         </View>
       </View>
     </View>
+  );
+}
+
+function CreatedBattleCard({
+  battle,
+  onTogglePin,
+}: {
+  battle: UserBattle;
+  onTogglePin: (battleId: string, pinned: boolean) => void;
+}) {
+  return (
+    <View style={styles.battleCard}>
+      <PinButton pinned onPress={() => onTogglePin(battle.id, false)} />
+      <View style={styles.battleCategory}>
+        <Text style={styles.battleCategoryIcon}>{battle.icon}</Text>
+        <Text style={styles.battleCategoryText}>{battle.category}</Text>
+      </View>
+      <Text style={styles.battleTitle}>{battle.title}</Text>
+      <Text style={styles.createdByText}>Created by you · {battle.time}</Text>
+      <Text style={styles.battleMetaText}>{battle.rules || 'No rules added'}</Text>
+    </View>
+  );
+}
+
+function PinButton({ pinned, onPress }: { pinned: boolean; onPress: () => void }) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={pinned ? 'Unpin battle' : 'Pin battle'}
+      accessibilityState={{ selected: pinned }}
+      onPress={onPress}
+      style={styles.pinButton}>
+      <SymbolView
+        name={{ ios: pinned ? 'pin.fill' : 'pin', android: 'push_pin', web: 'push_pin' }}
+        size={18}
+        tintColor={pinned ? '#E7842D' : '#B8A99D'}
+      />
+    </Pressable>
   );
 }
 
@@ -1050,6 +1180,47 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.14,
     shadowRadius: 5,
     elevation: 3,
+  },
+  pinButton: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    zIndex: 1,
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 16,
+    backgroundColor: '#FFF8F3',
+  },
+  emptyMineCard: {
+    alignItems: 'center',
+    marginTop: 16,
+    paddingHorizontal: 24,
+    paddingVertical: 36,
+    borderRadius: 22,
+    backgroundColor: '#FFF8F3',
+  },
+  emptyMineIcon: {
+    fontSize: 30,
+  },
+  emptyMineTitle: {
+    marginTop: 12,
+    color: '#44372F',
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  emptyMineText: {
+    marginTop: 6,
+    color: '#9B8C7F',
+    fontSize: 13,
+    textAlign: 'center',
+  },
+  createdByText: {
+    marginTop: 8,
+    color: '#D68140',
+    fontSize: 12,
+    fontWeight: '600',
   },
   levelHeader: {
     flexDirection: 'row',
