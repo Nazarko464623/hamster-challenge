@@ -2,11 +2,46 @@ import { BlurTargetView } from 'expo-blur';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { useEffect } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { welcomeBlurTarget } from '@/components/auth-blur-target';
+import { supabase } from '@/lib/supabase';
 
 export default function WelcomeScreen() {
+  useEffect(() => {
+    let isMounted = true;
+
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (!isMounted) {
+        return;
+      }
+
+      if (error) {
+        console.error('Failed to restore Supabase session:', error);
+        return;
+      }
+
+      if (data.session) {
+        const metadataNickname = data.session.user.user_metadata.nickname;
+        const nickname =
+          typeof metadataNickname === 'string' && metadataNickname.trim()
+            ? metadataNickname.trim()
+            : data.session.user.email?.split('@')[0] ?? 'Player';
+
+        router.replace({ pathname: '/feed', params: { nickname } });
+      }
+    }).catch((error: unknown) => {
+      if (isMounted) {
+        console.error('Failed to restore Supabase session:', error);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   return (
     <BlurTargetView ref={welcomeBlurTarget} style={styles.container}>
       <StatusBar hidden />

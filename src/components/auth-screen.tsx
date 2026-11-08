@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 
 import { welcomeBlurTarget } from './auth-blur-target';
+import { supabase } from '@/lib/supabase';
 
 type AuthScreenProps = {
   mode: 'login' | 'signup';
@@ -23,6 +24,7 @@ type AuthScreenProps = {
 
 type AuthField = 'nickname' | 'email' | 'password' | 'repeatedPassword';
 type AuthErrors = Partial<Record<AuthField, string>>;
+type AuthMessage = { text: string; tone: 'error' | 'info' };
 
 type AuthInputProps = {
   placeholder: string;
@@ -31,6 +33,7 @@ type AuthInputProps = {
   error?: string;
   helperText?: string;
   onChangeText: (value: string) => void;
+  value: string;
 };
 
 function AuthInput({
@@ -40,6 +43,7 @@ function AuthInput({
   error,
   helperText,
   onChangeText,
+  value,
 }: AuthInputProps) {
   return (
     <View>
@@ -53,6 +57,7 @@ function AuthInput({
         returnKeyType="next"
         secureTextEntry={secureTextEntry}
         style={[styles.input, styles.inputText, error && styles.inputError]}
+        value={value}
       />
       {error ? (
         <Text accessibilityLiveRegion="polite" style={styles.errorText}>
@@ -65,10 +70,56 @@ function AuthInput({
   );
 }
 
+function getAuthErrorMessage(error: { code?: string; message: string }, isSignup: boolean) {
+  const details = `${error.code ?? ''} ${error.message}`.toLowerCase();
+
+  if (details.includes('already registered') || details.includes('user_already_exists')) {
+    return 'this email is already in use.';
+  }
+  if (
+    details.includes('signup_disabled') ||
+    details.includes('signups are disabled') ||
+    details.includes('signups not allowed')
+  ) {
+    return 'new account sign up is turned off in supabase. enable “allow new users to sign up” in auth settings.';
+  }
+  if (
+    details.includes('email provider is disabled') ||
+    details.includes('email logins are disabled')
+  ) {
+    return 'the email provider is turned off in supabase. enable it in auth settings.';
+  }
+  if (details.includes('invalid login') || details.includes('invalid_credentials')) {
+    return 'email or password does not match.';
+  }
+  if (details.includes('weak_password')) {
+    return 'choose a stronger password and try again.';
+  }
+  if (details.includes('invalid email') || details.includes('email_address_invalid')) {
+    return 'enter a valid email address.';
+  }
+  if (details.includes('database error saving new user')) {
+    return 'supabase could not save this account. check your database triggers and auth logs.';
+  }
+  if (details.includes('rate limit') || details.includes('over_email_send_rate_limit')) {
+    return 'too many attempts. wait a little and try again.';
+  }
+
+  const message = error.message.trim().replace(/\s+/g, ' ').toLowerCase();
+  if (message) {
+    return message.length > 120 ? `${message.slice(0, 117)}...` : message;
+  }
+
+  return isSignup
+    ? 'could not create your account. please try again.'
+    : 'could not log in. check your details and try again.';
+}
+
 export function AuthScreen({ mode }: AuthScreenProps) {
   const isSignup = mode === 'signup';
-  const [rememberMe, setRememberMe] = useState(false);
   const [hasSubmitted, setHasSubmitted] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [authMessage, setAuthMessage] = useState<AuthMessage | null>(null);
   const [fields, setFields] = useState({
     nickname: '',
     email: '',
@@ -80,26 +131,27 @@ export function AuthScreen({ mode }: AuthScreenProps) {
   const cardHeight = Math.min(497, Math.max(0, height - 40));
   const updateField = (field: keyof typeof fields) => (value: string) => {
     setFields((currentFields) => ({ ...currentFields, [field]: value }));
+    setAuthMessage(null);
   };
   const getValidationErrors = (): AuthErrors => {
     const errors: AuthErrors = {};
     if (isSignup && !fields.nickname.trim()) {
-      errors.nickname = 'Nickname is required.';
+      errors.nickname = 'nickname is required.';
     }
     if (!fields.email.trim()) {
-      errors.email = 'Email is required.';
+      errors.email = 'email is required.';
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(fields.email.trim())) {
-      errors.email = 'Enter a valid email address.';
+      errors.email = 'enter a valid email address.';
     }
     if (!fields.password) {
-      errors.password = 'Password is required.';
+      errors.password = 'password is required.';
     } else if (fields.password.length < 8 || !/\d/.test(fields.password)) {
-      errors.password = 'Password does not meet the requirements.';
+      errors.password = 'use at least 8 characters and 1 number.';
     }
     if (isSignup && !fields.repeatedPassword) {
-      errors.repeatedPassword = 'Please repeat your password.';
+      errors.repeatedPassword = 'please repeat your password.';
     } else if (isSignup && fields.repeatedPassword !== fields.password) {
-      errors.repeatedPassword = 'Passwords do not match.';
+      errors.repeatedPassword = 'passwords do not match.';
     }
     return errors;
   };
@@ -112,35 +164,71 @@ export function AuthScreen({ mode }: AuthScreenProps) {
       router.replace('/');
     }
   };
-  const handleNext = () => {
+  const handleNext = async () => {
     Keyboard.dismiss();
     setHasSubmitted(true);
     if (Object.keys(getValidationErrors()).length > 0) {
       return;
     }
-    router.replace({
-      pathname: '/feed',
-      params: {
-        nickname: isSignup ? fields.nickname.trim() : fields.email.trim().split('@')[0],
-      },
-    });
-  };
-  const rememberMeRow = (
-    <Pressable
-      accessibilityRole="checkbox"
-      accessibilityLabel="Remember me"
-      accessibilityState={{ checked: rememberMe }}
-      onPress={() => setRememberMe((checked) => !checked)}
-      style={[styles.rememberRow, isSignup && styles.signupRememberRow]}>
-      <View style={[styles.checkbox, rememberMe && styles.checkedCheckbox]}>
-        {rememberMe && <View style={styles.checkboxIndicator} />}
-      </View>
-      <Text style={[styles.rememberText, rememberMe && styles.checkedRememberText]}>
-        remember me
-      </Text>
-    </Pressable>
-  );
+    setIsLoading(true);
+    setAuthMessage(null);
 
+    try {
+      const email = fields.email.trim();
+      let nickname = isSignup ? fields.nickname.trim() : email.split('@')[0];
+
+      if (isSignup) {
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password: fields.password,
+          options: { data: { nickname } },
+        });
+
+        if (error) {
+          setAuthMessage({ text: getAuthErrorMessage(error, true), tone: 'error' });
+          return;
+        }
+
+        if (!data.session) {
+          setAuthMessage({
+            text: 'email confirmation is on. turn off “confirm email” in supabase to sign up without verification.',
+            tone: 'info',
+          });
+          return;
+        }
+
+        const savedNickname = data.user?.user_metadata.nickname;
+        if (typeof savedNickname === 'string' && savedNickname.trim()) {
+          nickname = savedNickname.trim();
+        }
+      } else {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email,
+          password: fields.password,
+        });
+
+        if (error) {
+          setAuthMessage({ text: getAuthErrorMessage(error, false), tone: 'error' });
+          return;
+        }
+
+        const savedNickname = data.user.user_metadata.nickname;
+        if (typeof savedNickname === 'string' && savedNickname.trim()) {
+          nickname = savedNickname.trim();
+        }
+      }
+
+      router.replace({ pathname: '/feed', params: { nickname } });
+    } catch (error) {
+      console.error('Authentication request failed:', error);
+      setAuthMessage({
+        text: 'could not connect. check your internet and try again.',
+        tone: 'error',
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
   return (
     <View style={styles.backdrop}>
       <BlurView
@@ -184,12 +272,14 @@ export function AuthScreen({ mode }: AuthScreenProps) {
                   placeholder="nickname"
                   error={validationErrors.nickname}
                   onChangeText={updateField('nickname')}
+                  value={fields.nickname}
                 />
                 <AuthInput
                   placeholder="email"
                   keyboardType="email-address"
                   error={validationErrors.email}
                   onChangeText={updateField('email')}
+                  value={fields.email}
                 />
                 <AuthInput
                   placeholder="password"
@@ -197,15 +287,27 @@ export function AuthScreen({ mode }: AuthScreenProps) {
                   error={validationErrors.password}
                   helperText={'at least 8 characters\nat least 1 digit (0-9)'}
                   onChangeText={updateField('password')}
+                  value={fields.password}
                 />
                 <AuthInput
                   placeholder="repeat password"
                   secureTextEntry
                   error={validationErrors.repeatedPassword}
                   onChangeText={updateField('repeatedPassword')}
+                  value={fields.repeatedPassword}
                 />
               </View>
-              {rememberMeRow}
+              {authMessage ? (
+                <Text
+                  accessibilityLiveRegion="polite"
+                  style={[
+                    styles.authFeedback,
+                    styles.signupAuthFeedback,
+                    authMessage.tone === 'error' ? styles.authError : styles.authInfo,
+                  ]}>
+                  {authMessage.text}
+                </Text>
+              ) : null}
             </>
           ) : (
             <View style={styles.loginFields}>
@@ -214,23 +316,39 @@ export function AuthScreen({ mode }: AuthScreenProps) {
                 keyboardType="email-address"
                 error={validationErrors.email}
                 onChangeText={updateField('email')}
+                value={fields.email}
               />
               <AuthInput
                 placeholder="password"
                 secureTextEntry
                 error={validationErrors.password}
                 onChangeText={updateField('password')}
+                value={fields.password}
               />
-              {rememberMeRow}
+              {authMessage ? (
+                <Text
+                  accessibilityLiveRegion="polite"
+                  style={[
+                    styles.authFeedback,
+                    authMessage.tone === 'error' ? styles.authError : styles.authInfo,
+                  ]}>
+                  {authMessage.text}
+                </Text>
+              ) : null}
             </View>
           )}
 
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Next"
+            accessibilityLabel={isLoading ? 'Please wait' : isSignup ? 'Create account' : 'Log in'}
+            accessibilityState={{ disabled: isLoading }}
+            disabled={isLoading}
             onPress={handleNext}
-            style={({ pressed }) => [styles.nextButton, pressed && styles.pressed]}>
-            <Text style={styles.nextText}>next</Text>
+            style={({ pressed }) => [
+              styles.nextButton,
+              (pressed || isLoading) && styles.pressed,
+            ]}>
+            <Text style={styles.nextText}>{isLoading ? 'working...' : 'next'}</Text>
             <Text style={styles.nextArrow}>›</Text>
           </Pressable>
         </View>
@@ -315,7 +433,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   inputError: {
-    borderBottomColor: '#FF2D2D',
+    borderBottomColor: '#D47A62',
     borderBottomWidth: 2,
   },
   inputText: {
@@ -324,7 +442,7 @@ const styles = StyleSheet.create({
   errorText: {
     marginTop: 4,
     marginLeft: 10,
-    color: '#FF2D2D',
+    color: '#B84A32',
     fontSize: 14,
     lineHeight: 18,
   },
@@ -334,48 +452,29 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 21,
   },
-  rememberRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginTop: -6,
-    marginLeft: 6,
+  authFeedback: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderRadius: 16,
+    backgroundColor: '#FFF2EB',
+    fontSize: 13,
+    lineHeight: 18,
   },
-  signupRememberRow: {
+  signupAuthFeedback: {
     position: 'absolute',
-    left: '11.5%',
-    bottom: '14%',
-    marginTop: 0,
-    marginLeft: 0,
+    right: '8%',
+    bottom: '12%',
+    left: '8%',
+    textAlign: 'center',
   },
-  checkbox: {
-    width: 29,
-    height: 29,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 15,
-    backgroundColor: '#FFF2EB',
-    shadowColor: '#8D7967',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.12,
-    shadowRadius: 3,
-    elevation: 2,
+  authError: {
+    borderColor: '#E8B4A7',
+    color: '#A23A1B',
   },
-  checkedCheckbox: {
-    backgroundColor: '#FFF2EB',
-  },
-  checkboxIndicator: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: '#F98C3E',
-  },
-  rememberText: {
-    color: '#C5A988',
-    fontSize: 18,
-  },
-  checkedRememberText: {
-    color: '#E9803F',
+  authInfo: {
+    borderColor: '#FFD3A9',
+    color: '#A23A1B',
   },
   nextButton: {
     position: 'absolute',

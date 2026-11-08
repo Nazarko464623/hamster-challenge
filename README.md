@@ -10,7 +10,20 @@ This is an [Expo](https://expo.dev) project created with [`create-expo-app`](htt
    npm install
    ```
 
-2. Start the app
+2. Configure Supabase
+
+   Copy `.env.example` to `.env` and add your project's URL and **anon/publishable key** from the Supabase project's Connect dialog:
+
+   ```dotenv
+   EXPO_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+   EXPO_PUBLIC_SUPABASE_ANON_KEY=your-anon-or-publishable-key
+   ```
+
+   Do not put a `service_role` or secret key in the app. Supabase Auth stores new accounts in `auth.users`; the signup form saves the nickname in the user's metadata.
+
+   To let users sign up and continue immediately without confirming their email, open **Supabase Dashboard → Authentication → Sign In / Providers → Email** and turn off **Confirm email**. With this disabled, Supabase creates a session on signup and the app opens the feed. This is a Supabase project setting; it cannot safely be changed from the public mobile app.
+
+3. Start the app
 
    ```bash
    npx expo start
