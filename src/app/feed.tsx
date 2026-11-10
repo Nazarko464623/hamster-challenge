@@ -1,13 +1,39 @@
 import { SymbolView } from 'expo-symbols';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useState, type ComponentProps } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ComponentProps,
+  type ComponentRef,
+} from 'react';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path } from 'react-native-svg';
 
 import { PlayerSettings } from '@/components/player-settings';
 import { getMineData, setBattlePinned, type UserBattle } from '@/lib/battles';
+import {
+  getDirectMessages,
+  getMessagingSnapshot,
+  markDirectMessagesRead,
+  sendDirectMessage,
+  subscribeToMessages,
+  type ChatContact,
+  type DirectMessage,
+} from '@/lib/messages';
+import { supabase } from '@/lib/supabase';
 
 const feedTabs = [
   {
@@ -39,19 +65,6 @@ type BattleStatus = 'live' | 'ended' | 'mine';
 type BattleCategory = 'All' | 'Sports' | 'Art' | 'Photo';
 
 const battleCategories: BattleCategory[] = ['All', 'Sports', 'Art', 'Photo'];
-
-type ChatMessage = {
-  id: string;
-  text: string;
-  time: string;
-  outgoing: boolean;
-};
-
-const conversations = [
-  { id: 'mila', name: 'Mila', message: 'That was a close game!', time: 'now', unread: 2, color: '#E89550' },
-  { id: 'alex', name: 'Alex', message: 'Are you joining the next challenge?', time: '12:42', unread: 1, color: '#A8A08E' },
-  { id: 'team', name: 'Newgen team', message: 'You: Let’s do it 🔥', time: 'Yesterday', unread: 0, color: '#C77A61' },
-] as const;
 
 const liveBattles = [
   {
@@ -121,28 +134,9 @@ const endedGames = [
   },
 ] as const;
 
-const initialChatMessages: Record<string, ChatMessage[]> = {
-  mila: [
-    { id: 'mila-1', text: 'Hey! Did you see the new challenge?', time: '10:24', outgoing: false },
-    { id: 'mila-2', text: 'Yes, I’m joining now!', time: '10:26', outgoing: true },
-    { id: 'mila-3', text: 'That was a close game!', time: 'now', outgoing: false },
-  ],
-  alex: [
-    { id: 'alex-1', text: 'Nice work on your last win 👏', time: '12:38', outgoing: false },
-    { id: 'alex-2', text: 'Are you joining the next challenge?', time: '12:42', outgoing: false },
-  ],
-  team: [
-    { id: 'team-1', text: 'New challenge starts tonight!', time: 'Yesterday', outgoing: false },
-    { id: 'team-2', text: 'Let’s do it 🔥', time: 'Yesterday', outgoing: true },
-  ],
-};
-
 export default function FeedScreen() {
   const [activeTab, setActiveTab] = useState<FeedTabId>('home');
   const [battleStatus, setBattleStatus] = useState<BattleStatus>('live');
-  const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
-  const [chatMessages, setChatMessages] = useState(initialChatMessages);
-  const [chatDraft, setChatDraft] = useState('');
   const [pinnedBattleIds, setPinnedBattleIds] = useState<string[]>([]);
   const [createdBattles, setCreatedBattles] = useState<UserBattle[]>([]);
   const [showSettings, setShowSettings] = useState(false);
@@ -174,25 +168,6 @@ export default function FeedScreen() {
     }
 
     setActiveTab(tabId);
-    if (tabId !== 'messages') {
-      setSelectedChatId(null);
-    }
-  };
-
-  const sendChatMessage = () => {
-    const text = chatDraft.trim();
-    if (!selectedChatId || !text) {
-      return;
-    }
-
-    setChatMessages((current) => ({
-      ...current,
-      [selectedChatId]: [
-        ...(current[selectedChatId] ?? []),
-        { id: `${selectedChatId}-${Date.now()}`, text, time: 'now', outgoing: true },
-      ],
-    }));
-    setChatDraft('');
   };
 
   return (
@@ -202,15 +177,7 @@ export default function FeedScreen() {
       {activeTab === 'challenges' ? (
         <LeaderboardContent displayName={displayName} />
       ) : activeTab === 'messages' ? (
-        <ChatContent
-          selectedChatId={selectedChatId}
-          messages={chatMessages}
-          draft={chatDraft}
-          onDraftChange={setChatDraft}
-          onSend={sendChatMessage}
-          onOpenConversation={setSelectedChatId}
-          onBack={() => setSelectedChatId(null)}
-        />
+        <ChatContent />
       ) : activeTab === 'profile' ? (
         showSettings ? (
           <PlayerSettings
@@ -690,109 +657,269 @@ function PeriodButton({
   );
 }
 
-function ChatContent({
-  selectedChatId,
-  messages,
-  draft,
-  onDraftChange,
-  onSend,
-  onOpenConversation,
-  onBack,
-}: {
-  selectedChatId: string | null;
-  messages: Record<string, ChatMessage[]>;
-  draft: string;
-  onDraftChange: (value: string) => void;
-  onSend: () => void;
-  onOpenConversation: (id: string) => void;
-  onBack: () => void;
-}) {
+function ChatContent() {
   const [filter, setFilter] = useState<'all' | 'unread'>('all');
-  const selectedConversation = conversations.find((conversation) => conversation.id === selectedChatId);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
+  const [contacts, setContacts] = useState<ChatContact[]>([]);
+  const [messages, setMessages] = useState<DirectMessage[]>([]);
+  const [draft, setDraft] = useState('');
+  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [loadingMessages, setLoadingMessages] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState('');
+  const [chatError, setChatError] = useState('');
+  const selectedChatIdRef = useRef<string | null>(null);
+  const messageListRef = useRef<ComponentRef<typeof ScrollView>>(null);
 
-  if (selectedConversation) {
+  useEffect(() => {
+    selectedChatIdRef.current = selectedChatId;
+  }, [selectedChatId]);
+
+  const refreshMessagingData = useCallback(async () => {
+    if (!userId) {
+      return;
+    }
+
+    try {
+      const nextContacts = await getMessagingSnapshot(userId);
+      setContacts(nextContacts);
+      const openContactId = selectedChatIdRef.current;
+      if (openContactId) {
+        const nextMessages = await getDirectMessages(userId, openContactId);
+        if (selectedChatIdRef.current === openContactId) {
+          setMessages(nextMessages);
+        }
+      }
+      setError('');
+    } catch (loadError) {
+      console.error('Failed to refresh messages:', loadError);
+      setError('Could not load messages. Check your connection and try again.');
+    } finally {
+      setLoading(false);
+    }
+  }, [userId]);
+
+  useEffect(() => {
+    let active = true;
+    supabase.auth.getUser().then(({ data, error: authError }) => {
+      if (!active) {
+        return;
+      }
+      if (authError) {
+        throw authError;
+      }
+      if (!data.user) {
+        setError('Sign in to view and send messages.');
+        setLoading(false);
+        return;
+      }
+      setUserId(data.user.id);
+    }).catch((authError: unknown) => {
+      console.error('Failed to get the signed-in user for messages:', authError);
+      if (active) {
+        setError('Could not verify your account. Please sign in again.');
+        setLoading(false);
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!userId) {
+      return;
+    }
+
+    void Promise.resolve().then(() => refreshMessagingData());
+    const channel = subscribeToMessages(() => {
+      void refreshMessagingData();
+    });
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [refreshMessagingData, userId]);
+
+  useEffect(() => {
+    if (!userId || !selectedChatId) {
+      return;
+    }
+
+    let active = true;
+    getDirectMessages(userId, selectedChatId)
+      .then((nextMessages) => {
+        if (active) {
+          setMessages(nextMessages);
+        }
+      })
+      .catch((loadError: unknown) => {
+        console.error('Failed to load direct messages:', loadError);
+        if (active) {
+          setChatError('Could not load this conversation. Check your connection and try again.');
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setLoadingMessages(false);
+        }
+      });
+
+    markDirectMessagesRead(userId, selectedChatId)
+      .then(() => refreshMessagingData())
+      .catch((readError: unknown) => {
+        console.error('Failed to mark messages as read:', readError);
+        if (active) {
+          setChatError('Messages loaded, but unread status could not be updated.');
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [refreshMessagingData, selectedChatId, userId]);
+
+  const selectedConversation = contacts.find((contact) => contact.id === selectedChatId);
+
+  const sendMessage = async () => {
+    const text = draft.trim();
+    if (!userId || !selectedChatId || !text || sending) {
+      return;
+    }
+
+    setSending(true);
+    setChatError('');
+    try {
+      const sentMessage = await sendDirectMessage(userId, selectedChatId, text);
+      setMessages((current) =>
+        current.some((message) => message.id === sentMessage.id)
+          ? current
+          : [...current, sentMessage]
+      );
+      setDraft('');
+      await refreshMessagingData();
+    } catch (sendError) {
+      console.error('Failed to send direct message:', sendError);
+      setChatError('Message could not be sent. Please try again.');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  if (selectedChatId) {
+    const conversationName = selectedConversation?.name ?? 'Player';
     return (
       <View style={styles.chatScreen}>
-        <View style={styles.chatHeader}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Back to messages"
-            onPress={onBack}
-            style={styles.chatBackButton}>
-            <Text style={styles.chatBackArrow}>‹</Text>
-          </Pressable>
-          <View style={[styles.chatAvatar, { backgroundColor: selectedConversation.color }]}>
-            <Text style={styles.chatAvatarText}>{selectedConversation.name.slice(0, 1)}</Text>
-          </View>
-          <View style={styles.chatHeaderInfo}>
-            <Text style={styles.chatHeaderName}>{selectedConversation.name}</Text>
-            <Text style={styles.chatOnline}>Active now</Text>
-          </View>
-        </View>
-
-        <ScrollView
-          style={styles.messageScroll}
-          contentContainerStyle={styles.messageList}
-          showsVerticalScrollIndicator={false}>
-          <Text style={styles.chatDate}>TODAY</Text>
-          {(messages[selectedConversation.id] ?? []).map((message) => (
-            <View
-              key={message.id}
-              style={[
-                styles.messageLine,
-                message.outgoing ? styles.outgoingMessageLine : styles.incomingMessageLine,
-              ]}>
-              <View
-                style={[
-                  styles.messageBubble,
-                  message.outgoing ? styles.outgoingMessageBubble : styles.incomingMessageBubble,
-                ]}>
-                <Text
-                  style={[
-                    styles.messageText,
-                    message.outgoing && styles.outgoingMessageText,
-                  ]}>
-                  {message.text}
-                </Text>
-                <Text
-                  style={[
-                    styles.messageTime,
-                    message.outgoing && styles.outgoingMessageTime,
-                  ]}>
-                  {message.time}
-                </Text>
-              </View>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={0}
+          style={styles.chatKeyboard}>
+          <View style={styles.chatHeader}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Back to messages"
+              onPress={() => {
+                selectedChatIdRef.current = null;
+                setLoadingMessages(false);
+                setSelectedChatId(null);
+                setMessages([]);
+              }}
+              style={styles.chatBackButton}>
+              <Text style={styles.chatBackArrow}>‹</Text>
+            </Pressable>
+            <View style={[styles.chatAvatar, { backgroundColor: colorForName(conversationName) }]}>
+              <Text style={styles.chatAvatarText}>{conversationName.slice(0, 1).toUpperCase()}</Text>
             </View>
-          ))}
-        </ScrollView>
+            <View style={styles.chatHeaderInfo}>
+              <Text style={styles.chatHeaderName}>{conversationName}</Text>
+              <Text style={styles.chatOnline}>Direct messages</Text>
+            </View>
+          </View>
 
-        <View style={styles.composer}>
-          <TextInput
-            accessibilityLabel="Write a message"
-            placeholder="Write a message..."
-            placeholderTextColor="#B6A493"
-            returnKeyType="send"
-            onChangeText={onDraftChange}
-            onSubmitEditing={onSend}
-            value={draft}
-            style={styles.composerInput}
-          />
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Send message"
-            disabled={!draft.trim()}
-            onPress={onSend}
-            style={[styles.sendButton, !draft.trim() && styles.disabledSendButton]}>
-            <Text style={styles.sendButtonText}>↑</Text>
-          </Pressable>
-        </View>
+          <ScrollView
+            ref={messageListRef}
+            style={styles.messageScroll}
+            contentContainerStyle={styles.messageList}
+            onContentSizeChange={() => messageListRef.current?.scrollToEnd({ animated: true })}
+            showsVerticalScrollIndicator={false}>
+            {loadingMessages ? <Text style={styles.chatStatus}>Loading conversation…</Text> : null}
+            {!loadingMessages && messages.length === 0 ? (
+              <Text style={styles.chatStatus}>Send a message to start the conversation.</Text>
+            ) : null}
+            {messages.map((message) => {
+              const outgoing = message.senderId === userId;
+              return (
+                <View
+                  key={message.id}
+                  style={[
+                    styles.messageLine,
+                    outgoing ? styles.outgoingMessageLine : styles.incomingMessageLine,
+                  ]}>
+                  <View
+                    style={[
+                      styles.messageBubble,
+                      outgoing ? styles.outgoingMessageBubble : styles.incomingMessageBubble,
+                    ]}>
+                    <Text
+                      style={[
+                        styles.messageText,
+                        outgoing && styles.outgoingMessageText,
+                      ]}>
+                      {message.body}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.messageTime,
+                        outgoing && styles.outgoingMessageTime,
+                      ]}>
+                      {formatChatTime(message.createdAt)}
+                    </Text>
+                  </View>
+                </View>
+              );
+            })}
+          </ScrollView>
+
+          {chatError ? <Text style={styles.chatError}>{chatError}</Text> : null}
+          <View style={styles.composer}>
+            <TextInput
+              accessibilityLabel="Write a message"
+              maxLength={4000}
+              placeholder="Write a message..."
+              placeholderTextColor="#B6A493"
+              returnKeyType="send"
+              onChangeText={setDraft}
+              onSubmitEditing={() => void sendMessage()}
+              value={draft}
+              style={styles.composerInput}
+            />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Send message"
+              disabled={!draft.trim() || sending}
+              onPress={() => void sendMessage()}
+              style={[
+                styles.sendButton,
+                (!draft.trim() || sending) && styles.disabledSendButton,
+              ]}>
+              <Text style={styles.sendButtonText}>{sending ? '…' : '↑'}</Text>
+            </Pressable>
+          </View>
+        </KeyboardAvoidingView>
       </View>
     );
   }
 
-  const visibleConversations = conversations.filter(
-    (conversation) => filter === 'all' || conversation.unread > 0
-  );
+  const visibleConversations = contacts.filter((contact) => {
+    const searchTerm = search.trim().toLowerCase();
+    const matchesSearch =
+      contact.name.toLowerCase().includes(searchTerm) ||
+      contact.lastMessage.toLowerCase().includes(searchTerm);
+    const matchesFilter = filter === 'all' || contact.unreadCount > 0;
+    return matchesSearch && matchesFilter;
+  });
 
   return (
     <ScrollView
@@ -816,7 +943,9 @@ function ChatContent({
           accessibilityLabel="Search conversations"
           placeholder="Search messages"
           placeholderTextColor="#B6A493"
+          onChangeText={setSearch}
           style={styles.chatSearchInput}
+          value={search}
         />
       </View>
 
@@ -834,42 +963,99 @@ function ChatContent({
       </View>
 
       <View style={styles.conversationList}>
-        {visibleConversations.map((conversation) => (
-          <Pressable
-            key={conversation.id}
-            accessibilityRole="button"
-            accessibilityLabel={`Open chat with ${conversation.name}`}
-            onPress={() => onOpenConversation(conversation.id)}
-            style={styles.conversationRow}>
-            <View style={[styles.chatAvatar, { backgroundColor: conversation.color }]}>
-              <Text style={styles.chatAvatarText}>{conversation.name.slice(0, 1)}</Text>
-            </View>
-            <View style={styles.conversationInfo}>
-              <View style={styles.conversationTopline}>
-                <Text style={styles.conversationName}>{conversation.name}</Text>
-                <Text style={styles.conversationTime}>{conversation.time}</Text>
+        {loading ? (
+          <Text style={styles.chatStatus}>Loading players and conversations…</Text>
+        ) : error ? (
+          <View style={styles.chatEmptyState}>
+            <Text style={styles.chatError}>{error}</Text>
+            {userId ? (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => void refreshMessagingData()}
+                style={styles.retryButton}>
+                <Text style={styles.retryButtonText}>Try again</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : visibleConversations.length === 0 ? (
+          <Text style={styles.chatStatus}>
+            {contacts.length === 0
+              ? 'No other players have joined yet.'
+              : filter === 'unread' && !search.trim()
+                ? 'You have no unread messages.'
+                : 'No players match your search.'}
+          </Text>
+        ) : (
+          visibleConversations.map((conversation) => (
+            <Pressable
+              key={conversation.id}
+              accessibilityRole="button"
+              accessibilityLabel={`Open chat with ${conversation.name}`}
+              onPress={() => {
+                setChatError('');
+                setDraft('');
+                setMessages([]);
+                setLoadingMessages(true);
+                selectedChatIdRef.current = conversation.id;
+                setSelectedChatId(conversation.id);
+              }}
+              style={styles.conversationRow}>
+              <View style={[styles.chatAvatar, { backgroundColor: colorForName(conversation.name) }]}>
+                <Text style={styles.chatAvatarText}>{conversation.name.slice(0, 1).toUpperCase()}</Text>
               </View>
-              <View style={styles.conversationBottomline}>
-                <Text
-                  numberOfLines={1}
-                  style={[
-                    styles.conversationPreview,
-                    conversation.unread > 0 && styles.unreadPreview,
-                  ]}>
-                  {conversation.message}
-                </Text>
-                {conversation.unread > 0 && (
-                  <View style={styles.unreadBadge}>
-                    <Text style={styles.unreadBadgeText}>{conversation.unread}</Text>
-                  </View>
-                )}
+              <View style={styles.conversationInfo}>
+                <View style={styles.conversationTopline}>
+                  <Text style={styles.conversationName}>{conversation.name}</Text>
+                  <Text style={styles.conversationTime}>
+                    {conversation.lastMessageAt ? formatInboxTime(conversation.lastMessageAt) : ''}
+                  </Text>
+                </View>
+                <View style={styles.conversationBottomline}>
+                  <Text
+                    numberOfLines={1}
+                    style={[
+                      styles.conversationPreview,
+                      conversation.unreadCount > 0 && styles.unreadPreview,
+                    ]}>
+                    {conversation.lastMessage || 'Start a conversation'}
+                  </Text>
+                  {conversation.unreadCount > 0 ? (
+                    <View style={styles.unreadBadge}>
+                      <Text style={styles.unreadBadgeText}>
+                        {conversation.unreadCount > 99 ? '99+' : conversation.unreadCount}
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
               </View>
-            </View>
-          </Pressable>
-        ))}
+            </Pressable>
+          ))
+        )}
       </View>
     </ScrollView>
   );
+}
+
+function colorForName(name: string) {
+  const colors = ['#E89550', '#A8A08E', '#C77A61', '#8E9C78', '#9B83A8'];
+  const colorIndex = name.split('').reduce((sum, character) => sum + character.charCodeAt(0), 0);
+  return colors[colorIndex % colors.length];
+}
+
+function formatChatTime(timestamp: string) {
+  return new Date(timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+function formatInboxTime(timestamp: string) {
+  const date = new Date(timestamp);
+  const now = new Date();
+  if (date.toDateString() === now.toDateString()) {
+    return formatChatTime(timestamp);
+  }
+  if (now.getTime() - date.getTime() < 7 * 24 * 60 * 60 * 1000) {
+    return date.toLocaleDateString([], { weekday: 'short' });
+  }
+  return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
 function LineIcon({ type, active }: { type: Exclude<FeedTabId, 'create'>; active: boolean }) {
@@ -2028,6 +2214,37 @@ const styles = StyleSheet.create({
   conversationList: {
     marginTop: 10,
   },
+  chatStatus: {
+    marginTop: 18,
+    color: '#9B8C7F',
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: 'center',
+  },
+  chatEmptyState: {
+    alignItems: 'center',
+    paddingHorizontal: 16,
+  },
+  chatError: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    color: '#B84235',
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: 'center',
+  },
+  retryButton: {
+    marginTop: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 18,
+    backgroundColor: '#FFF0E4',
+  },
+  retryButtonText: {
+    color: '#9B592E',
+    fontSize: 13,
+    fontWeight: '600',
+  },
   conversationRow: {
     minHeight: 82,
     flexDirection: 'row',
@@ -2098,6 +2315,9 @@ const styles = StyleSheet.create({
   chatScreen: {
     flex: 1,
     paddingTop: 38,
+  },
+  chatKeyboard: {
+    flex: 1,
   },
   chatHeader: {
     minHeight: 68,

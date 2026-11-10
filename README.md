@@ -23,7 +23,11 @@ This is an [Expo](https://expo.dev) project created with [`create-expo-app`](htt
 
    To let users sign up and continue immediately without confirming their email, open **Supabase Dashboard → Authentication → Sign In / Providers → Email** and turn off **Confirm email**. With this disabled, Supabase creates a session on signup and the app opens the feed. This is a Supabase project setting; it cannot safely be changed from the public mobile app.
 
-3. Start the app
+3. Enable direct messages
+
+   Run [`supabase/migrations/20261110130000_direct_messages.sql`](./supabase/migrations/20261110130000_direct_messages.sql) in the Supabase SQL Editor. It creates player profiles and direct-message storage, applies row-level access policies, and enables realtime message updates. Messages are available to signed-in players; a player's email address is never exposed in the player directory.
+
+4. Start the app
 
    ```bash
    npx expo start
