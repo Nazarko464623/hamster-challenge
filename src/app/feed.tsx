@@ -6,6 +6,7 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path } from 'react-native-svg';
 
+import { PlayerSettings } from '@/components/player-settings';
 import { getMineData, setBattlePinned, type UserBattle } from '@/lib/battles';
 
 const feedTabs = [
@@ -144,10 +145,14 @@ export default function FeedScreen() {
   const [chatDraft, setChatDraft] = useState('');
   const [pinnedBattleIds, setPinnedBattleIds] = useState<string[]>([]);
   const [createdBattles, setCreatedBattles] = useState<UserBattle[]>([]);
+  const [showSettings, setShowSettings] = useState(false);
+  const [savedDisplayName, setSavedDisplayName] = useState<string | null>(null);
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { nickname } = useLocalSearchParams<{ nickname?: string }>();
-  const displayName = typeof nickname === 'string' && nickname.trim() ? nickname.trim() : 'Player';
+  const displayName =
+    savedDisplayName ??
+    (typeof nickname === 'string' && nickname.trim() ? nickname.trim() : 'Player');
 
   useEffect(() => {
     let active = true;
@@ -207,7 +212,15 @@ export default function FeedScreen() {
           onBack={() => setSelectedChatId(null)}
         />
       ) : activeTab === 'profile' ? (
-        <ProfileContent displayName={displayName} />
+        showSettings ? (
+          <PlayerSettings
+            displayName={displayName}
+            onClose={() => setShowSettings(false)}
+            onNameSaved={setSavedDisplayName}
+          />
+        ) : (
+          <ProfileContent displayName={displayName} onOpenSettings={() => setShowSettings(true)} />
+        )
       ) : (
         <HomeContent
           topInset={insets.top}
@@ -944,7 +957,13 @@ function LineIcon({ type, active }: { type: Exclude<FeedTabId, 'create'>; active
   );
 }
 
-function ProfileContent({ displayName }: { displayName: string }) {
+function ProfileContent({
+  displayName,
+  onOpenSettings,
+}: {
+  displayName: string;
+  onOpenSettings: () => void;
+}) {
   return (
     <ScrollView
       style={styles.profileScroll}
@@ -970,13 +989,19 @@ function ProfileContent({ displayName }: { displayName: string }) {
           {displayName}
         </Text>
         <Text style={styles.profileTags}>#humstbattle   #newgen</Text>
-        <SymbolView
-          accessibilityLabel="Profile settings"
-          name={{ ios: 'slider.horizontal.3', android: 'tune', web: 'tune' }}
-          size={26}
-          tintColor="#E9803F"
-          style={styles.settingsIcon}
-        />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Open settings"
+          hitSlop={6}
+          onPress={onOpenSettings}
+          style={({ pressed }) => [styles.settingsButton, pressed && styles.settingsButtonPressed]}>
+          <SymbolView
+            name={{ ios: 'slider.horizontal.3', android: 'tune', web: 'tune' }}
+            size={22}
+            tintColor="#C96B30"
+            style={styles.settingsIcon}
+          />
+        </Pressable>
       </View>
 
       <View style={styles.levelCard}>
@@ -1163,12 +1188,31 @@ const styles = StyleSheet.create({
     color: '#929292',
     fontSize: 17,
   },
-  settingsIcon: {
+  settingsButton: {
     position: 'absolute',
-    top: 0,
-    right: 4,
-    width: 32,
-    height: 32,
+    top: -1,
+    right: 0,
+    width: 46,
+    height: 46,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#F2D1B8',
+    borderRadius: 23,
+    backgroundColor: '#FFF3E9',
+    shadowColor: '#8D7967',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  settingsButtonPressed: {
+    opacity: 0.72,
+    transform: [{ scale: 0.96 }],
+  },
+  settingsIcon: {
+    width: 24,
+    height: 24,
   },
   levelCard: {
     marginTop: 24,

@@ -53,6 +53,31 @@ export async function getMineData(user: string) {
   return readMineData(user);
 }
 
+export async function renameMineData(previousUser: string, nextUser: string) {
+  const previousKey = storageKey(previousUser);
+  const nextKey = storageKey(nextUser);
+  if (previousKey === nextKey) {
+    return;
+  }
+
+  const previousValue = await AsyncStorage.getItem(previousKey);
+  if (!previousValue) {
+    return;
+  }
+
+  const previousData = await readMineData(previousUser);
+  const nextData = await readMineData(nextUser);
+  const previousBattleIds = new Set(previousData.createdBattles.map((battle) => battle.id));
+  await writeMineData(nextUser, {
+    pinnedIds: [...new Set([...previousData.pinnedIds, ...nextData.pinnedIds])],
+    createdBattles: [
+      ...previousData.createdBattles,
+      ...nextData.createdBattles.filter((battle) => !previousBattleIds.has(battle.id)),
+    ],
+  });
+  await AsyncStorage.removeItem(previousKey);
+}
+
 export async function setBattlePinned(user: string, battleId: string, pinned: boolean) {
   const data = await readMineData(user);
   const pinnedIds = new Set(data.pinnedIds);
