@@ -33,6 +33,8 @@ const lightTextOnAccent = new Set([
   'endedVotedText',
   'sendButtonText',
   'outgoingMessageText',
+  'signUpText',
+  'pressedSignUpText',
 ]);
 
 const lightColors: Record<string, string> = {

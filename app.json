@@ -4,6 +4,7 @@
     "slug": "hamster-challenge",
     "version": "1.0.0",
     "orientation": "portrait",
+    "backgroundColor": "#171717",
     "icon": "./assets/images/icon.png",
     "scheme": "hamsterchallenge",
     "userInterfaceStyle": "automatic",
@@ -13,6 +14,7 @@
     },
     "android": {
       "package": "com.zhopa.hamsterchallenge",
+      "backgroundColor": "#171717",
       "adaptiveIcon": {
         "backgroundColor": "#111111",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
