@@ -57,6 +57,21 @@ export function isBlockedEmailDomain(domain: string) {
   return BLOCKED_DOMAINS.has(value) || BLOCKED_ZONES.some((zone) => value.endsWith(zone));
 }
 
+// Characters allowed in an email address: Latin letters, digits and a few symbols.
+// Cyrillic and other alphabets are not accepted: mail services give out Latin-only addresses.
+const EMAIL_ALLOWED_CHARS = /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~@-]*$/;
+const EMAIL_FORMAT = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/;
+
+/** True when the text has letters or symbols that cannot be in an email (e.g. Cyrillic). */
+export function hasInvalidEmailChars(value: string) {
+  return !EMAIL_ALLOWED_CHARS.test(value.trim());
+}
+
+/** Full check of an email address (Latin only, local part, @, domain with a zone). */
+export function isValidEmail(value: string) {
+  return EMAIL_FORMAT.test(value.trim());
+}
+
 /**
  * Returns full email addresses to suggest for what the user has typed so far.
  * Suggestions appear only after "@" and only while the domain is not complete yet.
@@ -65,6 +80,10 @@ export function isBlockedEmailDomain(domain: string) {
 export function getEmailSuggestions(value: string, limit = 4): string[] {
   const atIndex = value.indexOf('@');
   if (atIndex < 1 || value.indexOf('@', atIndex + 1) !== -1 || /\s/.test(value)) {
+    return [];
+  }
+
+  if (hasInvalidEmailChars(value)) {
     return [];
   }
 

@@ -17,7 +17,7 @@ import {
 
 import { welcomeBlurTarget } from './auth-blur-target';
 import { themeColor, useAppTheme, useThemedStyles } from '@/components/app-theme-provider';
-import { getEmailSuggestions } from '@/lib/email-domains';
+import { getEmailSuggestions, hasInvalidEmailChars, isValidEmail } from '@/lib/email-domains';
 import { LEGAL_VERSION } from '@/lib/legal';
 import { supabase } from '@/lib/supabase';
 
@@ -103,6 +103,8 @@ function AuthInput({
   );
 }
 
+const latinOnlyEmailError = 'use latin letters only (a-z), switch your keyboard to english.';
+
 function getAuthErrorMessage(error: { code?: string; message: string }, isSignup: boolean) {
   const details = `${error.code ?? ''} ${error.message}`.toLowerCase();
 
@@ -175,7 +177,9 @@ export function AuthScreen({ mode }: AuthScreenProps) {
     }
     if (!fields.email.trim()) {
       errors.email = 'email is required.';
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(fields.email.trim())) {
+    } else if (hasInvalidEmailChars(fields.email)) {
+      errors.email = latinOnlyEmailError;
+    } else if (!isValidEmail(fields.email)) {
       errors.email = 'enter a valid email address.';
     }
     if (!fields.password) {
@@ -193,7 +197,11 @@ export function AuthScreen({ mode }: AuthScreenProps) {
     }
     return errors;
   };
-  const validationErrors = hasSubmitted ? getValidationErrors() : {};
+  const validationErrors: AuthErrors = hasSubmitted ? getValidationErrors() : {};
+  if (!validationErrors.email && hasInvalidEmailChars(fields.email)) {
+    // Shown while typing, before "next" is pressed, so Cyrillic is caught at once.
+    validationErrors.email = latinOnlyEmailError;
+  }
   // The terms checkbox shows its own hint, so it should not squeeze the input fields.
   const hasValidationErrors = Object.keys(validationErrors).some((field) => field !== 'terms');
   const openLegal = (pathname: '/terms' | '/privacy') => {
