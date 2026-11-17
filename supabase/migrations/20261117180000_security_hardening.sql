@@ -187,7 +187,7 @@ declare
   result text;
 begin
   -- remove control and invisible characters (zero-width spaces, direction marks, BOM)
-  result := regexp_replace(coalesce(raw_nickname, ''), '[[:cntrl:]​-‏‪-‮⁠-⁤﻿]', '', 'g');
+  result := regexp_replace(coalesce(raw_nickname, ''), '[[:cntrl:]\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF]', '', 'g');
   result := btrim(regexp_replace(result, '\s+', ' ', 'g'));
   result := left(result, 24);
 
