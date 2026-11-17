@@ -17,6 +17,7 @@ import {
 
 import { welcomeBlurTarget } from './auth-blur-target';
 import { themeColor, useAppTheme, useThemedStyles } from '@/components/app-theme-provider';
+import { getEmailSuggestions } from '@/lib/email-domains';
 import { supabase } from '@/lib/supabase';
 
 type AuthScreenProps = {
@@ -35,6 +36,7 @@ type AuthInputProps = {
   helperText?: string;
   onChangeText: (value: string) => void;
   value: string;
+  suggestEmails?: boolean;
 };
 
 function AuthInput({
@@ -45,16 +47,23 @@ function AuthInput({
   helperText,
   onChangeText,
   value,
+  suggestEmails,
 }: AuthInputProps) {
   const styles = useThemedStyles(baseStyles);
   const { mode } = useAppTheme();
+  const [isFocused, setIsFocused] = useState(false);
+  const suggestions = suggestEmails && isFocused ? getEmailSuggestions(value) : [];
+  const showSuggestions = suggestions.length > 0;
   return (
-    <View>
+    <View style={showSuggestions && styles.inputWithSuggestions}>
       <TextInput
         accessibilityLabel={placeholder}
         autoCapitalize="none"
+        autoCorrect={suggestEmails ? false : undefined}
         keyboardType={keyboardType}
+        onBlur={() => setIsFocused(false)}
         onChangeText={onChangeText}
+        onFocus={() => setIsFocused(true)}
         placeholder={placeholder}
         placeholderTextColor={themeColor('#999999', mode)}
         returnKeyType="next"
@@ -62,6 +71,25 @@ function AuthInput({
         style={[styles.input, styles.inputText, error && styles.inputError]}
         value={value}
       />
+      {showSuggestions ? (
+        <View accessibilityRole="menu" style={styles.suggestionList}>
+          {suggestions.map((suggestion) => (
+            <Pressable
+              key={suggestion}
+              accessibilityRole="menuitem"
+              accessibilityLabel={`Use ${suggestion}`}
+              onPressIn={() => onChangeText(suggestion)}
+              style={({ pressed }) => [styles.suggestionItem, pressed && styles.suggestionPressed]}>
+              <Text numberOfLines={1} style={styles.suggestionText}>
+                {suggestion.slice(0, suggestion.indexOf('@') + 1)}
+                <Text style={styles.suggestionDomain}>
+                  {suggestion.slice(suggestion.indexOf('@') + 1)}
+                </Text>
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
       {error ? (
         <Text accessibilityLiveRegion="polite" style={styles.errorText}>
           {error}
@@ -281,6 +309,7 @@ export function AuthScreen({ mode }: AuthScreenProps) {
                 <AuthInput
                   placeholder="email"
                   keyboardType="email-address"
+                  suggestEmails
                   error={validationErrors.email}
                   onChangeText={updateField('email')}
                   value={fields.email}
@@ -318,6 +347,7 @@ export function AuthScreen({ mode }: AuthScreenProps) {
               <AuthInput
                 placeholder="email"
                 keyboardType="email-address"
+                suggestEmails
                 error={validationErrors.email}
                 onChangeText={updateField('email')}
                 value={fields.email}
@@ -435,6 +465,43 @@ const baseStyles = StyleSheet.create({
     shadowOpacity: 0.12,
     shadowRadius: 3,
     elevation: 2,
+  },
+  inputWithSuggestions: {
+    zIndex: 10,
+    elevation: 10,
+  },
+  suggestionList: {
+    position: 'absolute',
+    top: 49,
+    right: 0,
+    left: 0,
+    zIndex: 10,
+    overflow: 'hidden',
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: '#444444',
+    borderRadius: 18,
+    backgroundColor: '#222222',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 10,
+  },
+  suggestionItem: {
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+  },
+  suggestionPressed: {
+    backgroundColor: '#393939',
+  },
+  suggestionText: {
+    color: '#C4C4C4',
+    fontSize: 15,
+  },
+  suggestionDomain: {
+    color: '#F28C28',
+    fontWeight: '600',
   },
   inputError: {
     borderBottomColor: '#D47A62',
