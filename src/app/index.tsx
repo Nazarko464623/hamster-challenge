@@ -85,8 +85,22 @@ export default function WelcomeScreen() {
       </View>
 
       <Text style={styles.legalText}>
-        By continuing, you agree to the <Text style={styles.legalLink}>Terms of Use</Text>
-        {'\n'}and <Text style={styles.legalLink}>Privacy Policy</Text>
+        By continuing, you agree to the{' '}
+        <Text
+          accessibilityRole="link"
+          onPress={() => router.push('/terms')}
+          suppressHighlighting
+          style={styles.legalLink}>
+          Terms of Use
+        </Text>
+        {'\n'}and{' '}
+        <Text
+          accessibilityRole="link"
+          onPress={() => router.push('/privacy')}
+          suppressHighlighting
+          style={styles.legalLink}>
+          Privacy Policy
+        </Text>
       </Text>
 
       <Image
@@ -164,6 +178,7 @@ const baseStyles = StyleSheet.create({
   },
   legalLink: {
     color: '#F28C28',
+    textDecorationLine: 'underline',
   },
   productionLogo: {
     position: 'absolute',
