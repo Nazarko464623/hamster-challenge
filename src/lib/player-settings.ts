@@ -73,3 +73,35 @@ export async function savePlayerTags(tags: string, userKey = 'default') {
   await AsyncStorage.setItem(`${tagsStorageKey}:${userKey}`, tags);
 }
 
+const avatarStorageKey = 'hamster-battle:player-avatar:v1';
+
+// Clean up any legacy default key that leaked across profiles
+void AsyncStorage.removeItem(`${avatarStorageKey}:default`).catch(() => {});
+
+export async function getPlayerAvatar(userKey?: string | null): Promise<string | null> {
+  const key = userKey?.trim();
+  if (!key || key === 'default') {
+    return null;
+  }
+  return await AsyncStorage.getItem(`${avatarStorageKey}:${key}`);
+}
+
+export async function savePlayerAvatar(uri: string, userKey?: string | null) {
+  const key = userKey?.trim();
+  if (!key || key === 'default') {
+    return;
+  }
+  await AsyncStorage.setItem(`${avatarStorageKey}:${key}`, uri);
+  void AsyncStorage.removeItem(`${avatarStorageKey}:default`).catch(() => {});
+}
+
+export async function removePlayerAvatar(userKey?: string | null) {
+  const key = userKey?.trim();
+  if (!key || key === 'default') {
+    return;
+  }
+  await AsyncStorage.removeItem(`${avatarStorageKey}:${key}`);
+  void AsyncStorage.removeItem(`${avatarStorageKey}:default`).catch(() => {});
+}
+
+

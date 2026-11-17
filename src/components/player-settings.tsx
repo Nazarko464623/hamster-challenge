@@ -14,8 +14,10 @@ import {
 import { renameMineData } from '@/lib/battles';
 import {
   formatProfileTags,
+  getPlayerAvatar,
   getPlayerPreferences,
   getPlayerTags,
+  savePlayerAvatar,
   savePlayerPreferences,
   savePlayerTags,
 } from '@/lib/player-settings';
@@ -168,6 +170,10 @@ export function PlayerSettings({
         await renameMineData(displayName, trimmedName);
         if (tags) {
           await savePlayerTags(tags, trimmedName);
+        }
+        const currentAvatar = await getPlayerAvatar(displayName);
+        if (currentAvatar) {
+          await savePlayerAvatar(currentAvatar, trimmedName);
         }
       } catch (error) {
         console.error('Failed to move player battle data after renaming:', error);

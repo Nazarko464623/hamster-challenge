@@ -21,12 +21,15 @@ import {
   Text,
   TextInput,
   View,
+  type ImageStyle,
+  type StyleProp,
+  type ViewStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path } from 'react-native-svg';
 
 import { PlayerSettings } from '@/components/player-settings';
-import { getPlayerTags } from '@/lib/player-settings';
+import { getPlayerAvatar, getPlayerTags, removePlayerAvatar, savePlayerAvatar, savePlayerTags } from '@/lib/player-settings';
 import { themeColor, useAppTheme, useThemedStyles } from '@/components/app-theme-provider';
 import { addBattleEntry, getMineData, getSharedBattles, setBattlePinned, type UserBattle } from '@/lib/battles';
 import {
@@ -151,6 +154,7 @@ export default function FeedScreen() {
   const [showSettings, setShowSettings] = useState(false);
   const [savedDisplayName, setSavedDisplayName] = useState<string | null>(null);
   const [userTags, setUserTags] = useState<string>('');
+  const [userAvatar, setUserAvatar] = useState<string | null>(null);
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { nickname } = useLocalSearchParams<{ nickname?: string }>();
@@ -163,6 +167,24 @@ export default function FeedScreen() {
     getPlayerTags(displayName).then((tags) => {
       if (active && tags) {
         setUserTags(tags);
+      }
+    });
+    getPlayerAvatar(displayName).then((avatar) => {
+      if (active && avatar) {
+        setUserAvatar(avatar);
+      }
+    });
+    supabase.auth.getUser().then(({ data }) => {
+      const meta = data.user?.user_metadata;
+      if (active && meta) {
+        if (typeof meta.profile_tags === 'string' && meta.profile_tags) {
+          setUserTags(meta.profile_tags);
+          savePlayerTags(meta.profile_tags, displayName);
+        }
+        if (typeof meta.avatar_url === 'string' && meta.avatar_url) {
+          setUserAvatar(meta.avatar_url);
+          savePlayerAvatar(meta.avatar_url, displayName);
+        }
       }
     });
     getMineData(displayName).then((data) => {
@@ -180,6 +202,47 @@ export default function FeedScreen() {
       active = false;
     };
   }, [displayName]);
+
+  const handlePickAvatar = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.85,
+    });
+
+    if (!result.canceled && result.assets?.[0]?.uri) {
+      const uri = result.assets[0].uri;
+      setUserAvatar(uri);
+      await savePlayerAvatar(uri, displayName);
+
+      try {
+        await supabase.auth.updateUser({
+          data: { avatar_url: uri },
+        });
+      } catch (err) {
+        console.warn('Could not sync avatar to supabase:', err);
+      }
+    }
+  };
+
+  const handleRemoveAvatar = async () => {
+    setUserAvatar(null);
+    await removePlayerAvatar(displayName);
+
+    try {
+      await supabase.auth.updateUser({
+        data: { avatar_url: null },
+      });
+    } catch (err) {
+      console.warn('Could not sync removed avatar to supabase:', err);
+    }
+  };
 
   const handleTabPress = (tabId: FeedTabId) => {
     if (tabId === 'create') {
@@ -212,9 +275,9 @@ export default function FeedScreen() {
       <StatusBar hidden />
 
       {activeTab === 'challenges' ? (
-        <LeaderboardContent displayName={displayName} />
+        <LeaderboardContent displayName={displayName} userAvatar={userAvatar} />
       ) : activeTab === 'messages' ? (
-        <ChatContent />
+        <ChatContent displayName={displayName} userAvatar={userAvatar} />
       ) : activeTab === 'profile' ? (
         showSettings ? (
           <PlayerSettings
@@ -228,6 +291,9 @@ export default function FeedScreen() {
           <ProfileContent
             displayName={displayName}
             tags={userTags}
+            userAvatar={userAvatar}
+            onPickAvatar={handlePickAvatar}
+            onRemoveAvatar={handleRemoveAvatar}
             onOpenSettings={() => setShowSettings(true)}
           />
         )
@@ -248,6 +314,8 @@ export default function FeedScreen() {
             );
             await setBattlePinned(displayName, battleId, pinned);
           }}
+          displayName={displayName}
+          userAvatar={userAvatar}
         />
       )}
 
@@ -294,7 +362,83 @@ function dedupeBattles(battles: UserBattle[]) {
   return [...new Map(battles.map((battle) => [battle.id, battle])).values()];
 }
 
-function LeaderboardContent({ displayName }: { displayName: string }) {
+function UserAvatar({
+  name,
+  uri,
+  size = 40,
+  style,
+}: {
+  name: string;
+  uri?: string | null;
+  size?: number;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const { mode } = useAppTheme();
+  const [loadFailed, setLoadFailed] = useState(false);
+  const initial = (name.trim()[0] || 'P').toUpperCase();
+  const fontSize = Math.round(size * 0.44);
+
+  useEffect(() => {
+    setLoadFailed(false);
+  }, [uri]);
+
+  if (uri && !loadFailed) {
+    return (
+      <Image
+        key={uri}
+        source={{ uri }}
+        onError={() => setLoadFailed(true)}
+        accessibilityLabel={`${name} avatar`}
+        style={[
+          {
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+            backgroundColor: mode === 'light' ? '#E8F3FA' : '#202020',
+          },
+          style as StyleProp<ImageStyle>,
+        ]}
+      />
+    );
+  }
+
+  const backgroundColor = mode === 'light' ? '#208AEF' : '#F28C28';
+  const textColor = mode === 'light' ? '#FFFFFF' : '#1E1E1E';
+
+  return (
+    <View
+      style={[
+        {
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          backgroundColor,
+          alignItems: 'center',
+          justifyContent: 'center',
+        },
+        style,
+      ]}>
+      <Text
+        style={{
+          color: textColor,
+          fontSize,
+          fontWeight: '800',
+          textAlign: 'center',
+          includeFontPadding: false,
+        }}>
+        {initial}
+      </Text>
+    </View>
+  );
+}
+
+function LeaderboardContent({
+  displayName,
+  userAvatar,
+}: {
+  displayName: string;
+  userAvatar?: string | null;
+}) {
   const styles = useThemedStyles(baseStyles);
   const { mode } = useAppTheme();
   const [period, setPeriod] = useState<'week' | 'all-time'>('week');
@@ -381,6 +525,7 @@ function LeaderboardContent({ displayName }: { displayName: string }) {
         <View style={styles.rankNumber}>
           <Text style={styles.rankNumberText}>#12</Text>
         </View>
+        <UserAvatar name={displayName} uri={userAvatar} size={38} style={{ marginRight: 10 }} />
         <View style={styles.rankPlayer}>
           <Text style={styles.rankPlayerName} numberOfLines={1}>
             {displayName} <Text style={styles.youLabel}>· You</Text>
@@ -418,6 +563,8 @@ function HomeContent({
   onJoinBattle,
   debugEndedBattleIds,
   onEndBattle,
+  displayName,
+  userAvatar,
 }: {
   topInset: number;
   status: BattleStatus;
@@ -429,6 +576,8 @@ function HomeContent({
   onJoinBattle: (battleId: string, artworkUri: string) => Promise<string>;
   debugEndedBattleIds: string[];
   onEndBattle: (battleId: string) => void;
+  displayName: string;
+  userAvatar?: string | null;
 }) {
   const styles = useThemedStyles(baseStyles);
   const [selectedCategory, setSelectedCategory] = useState<BattleCategory>('All');
@@ -493,7 +642,10 @@ function HomeContent({
       ]}
       showsVerticalScrollIndicator={false}>
       <View style={styles.battlesHeader}>
-        <Text style={styles.battlesTitle}>Battles</Text>
+        <View style={styles.battlesHeaderTitleRow}>
+          <UserAvatar name={displayName} uri={userAvatar} size={36} />
+          <Text style={styles.battlesTitle}>Battles</Text>
+        </View>
         <View style={styles.battleStreakBadge}>
           <Text style={styles.battleStreakText}>🔥 4-day streak</Text>
         </View>
@@ -571,15 +723,27 @@ function HomeContent({
         </ScrollView>
       )}
 
-      {status === 'live' && visibleLiveBattles.map((battle) => (
+      {status === 'live' && visibleLiveBattles.map((battle) => {
+        const battleOwner = ('owner' in battle && typeof battle.owner === 'string' && battle.owner) ? battle.owner : 'Player';
+        return (
         <View key={battle.id} style={styles.battleCard}>
           <PinButton
             pinned={pinnedBattleIds.includes(battle.id)}
             onPress={() => onTogglePin(battle.id, !pinnedBattleIds.includes(battle.id))}
           />
-          <View style={styles.battleCategory}>
-            <Text style={styles.battleCategoryIcon}>{battle.icon}</Text>
-            <Text style={styles.battleCategoryText}>{battle.category}</Text>
+          <View style={styles.battleHeaderRow}>
+            <View style={styles.battleCategory}>
+              <Text style={styles.battleCategoryIcon}>{battle.icon}</Text>
+              <Text style={styles.battleCategoryText}>{battle.category}</Text>
+            </View>
+            <View style={styles.battleCreatorBadge}>
+              <UserAvatar
+                name={battleOwner}
+                uri={battleOwner === displayName ? userAvatar : undefined}
+                size={22}
+              />
+              <Text style={styles.battleCreatorText}>{battleOwner}</Text>
+            </View>
           </View>
           <Text style={styles.battleTitle}>{battle.title}</Text>
            {'artworkUrl' in battle && battle.artworkUrl && (
@@ -609,12 +773,15 @@ function HomeContent({
              <Text style={styles.debugEndButtonText}>End battle (debug)</Text>
            </Pressable>
         </View>
-      ))}
+      );
+      })}
       {status === 'ended' &&
         endedGames.map((game) => (
           <EndedGameCard
             key={game.id}
             game={game}
+            displayName={displayName}
+            userAvatar={userAvatar}
             pinned={pinnedBattleIds.includes(game.id)}
             onTogglePin={onTogglePin}
           />
@@ -627,7 +794,13 @@ function HomeContent({
         </View>
       ))}
       {status === 'ended' && userEndedBattles.map((battle) => (
-        <CreatedBattleCard key={battle.id} battle={battle} onTogglePin={onTogglePin} />
+        <CreatedBattleCard
+          key={battle.id}
+          battle={battle}
+          displayName={displayName}
+          userAvatar={userAvatar}
+          onTogglePin={onTogglePin}
+        />
       ))}
       {status === 'mine' && mineBattlesCount === 0 && (
         <View style={styles.emptyMineCard}>
@@ -654,12 +827,20 @@ function HomeContent({
         <EndedGameCard
           key={game.id}
           game={game}
+          displayName={displayName}
+          userAvatar={userAvatar}
           pinned
           onTogglePin={onTogglePin}
         />
       ))}
       {status === 'mine' && createdBattles.map((battle) => (
-        <CreatedBattleCard key={battle.id} battle={battle} onTogglePin={onTogglePin} />
+        <CreatedBattleCard
+          key={battle.id}
+          battle={battle}
+          displayName={displayName}
+          userAvatar={userAvatar}
+          onTogglePin={onTogglePin}
+        />
       ))}
       </ScrollView>
 
@@ -705,10 +886,14 @@ function HomeContent({
 function EndedGameCard({
   game,
   pinned,
+  displayName,
+  userAvatar,
   onTogglePin,
 }: {
   game: (typeof endedGames)[number];
   pinned: boolean;
+  displayName: string;
+  userAvatar?: string | null;
   onTogglePin: (battleId: string, pinned: boolean) => void;
 }) {
   const styles = useThemedStyles(baseStyles);
@@ -719,11 +904,11 @@ function EndedGameCard({
     <View style={styles.endedGameCard}>
       <PinButton pinned={pinned} onPress={() => onTogglePin(game.id, !pinned)} />
       <View style={styles.endedAuthorRow}>
-        <View style={styles.endedAvatar}>
-          <Text style={styles.endedAvatarText}>
-            {game.author.slice(0, 2).toUpperCase()}
-          </Text>
-        </View>
+        <UserAvatar
+          name={game.author}
+          uri={game.author === displayName ? userAvatar : undefined}
+          size={38}
+        />
         <View style={styles.endedAuthorDetails}>
           <Text style={styles.endedAuthorName}>{game.author}</Text>
           <Text style={styles.endedTime}>{game.time}</Text>
@@ -774,9 +959,13 @@ function EndedGameCard({
 
 function CreatedBattleCard({
   battle,
+  displayName,
+  userAvatar,
   onTogglePin,
 }: {
   battle: UserBattle;
+  displayName: string;
+  userAvatar?: string | null;
   onTogglePin: (battleId: string, pinned: boolean) => void;
 }) {
   const styles = useThemedStyles(baseStyles);
@@ -791,7 +980,10 @@ function CreatedBattleCard({
       {battle.artworkUrl && (
         <Image accessibilityLabel={`${battle.title} artwork`} source={{ uri: battle.artworkUrl }} style={styles.battleArtwork} />
       )}
-      <Text style={styles.createdByText}>Created by you · {battle.time}</Text>
+      <View style={styles.battleCreatorRow}>
+        <UserAvatar name={battle.owner || displayName} uri={userAvatar} size={28} />
+        <Text style={styles.createdByText}>Created by you · {battle.time}</Text>
+      </View>
       <Text style={styles.battleMetaText}>{battle.status === 'ended' ? 'Ended' : battle.rules || 'Open to everyone'}</Text>
     </View>
   );
@@ -839,9 +1031,17 @@ function PeriodButton({
   );
 }
 
-function ChatContent() {
+function ChatContent({
+  displayName,
+  userAvatar,
+}: {
+  displayName: string;
+  userAvatar?: string | null;
+}) {
   const styles = useThemedStyles(baseStyles);
   const { mode } = useAppTheme();
+  const [activeAvatar, setActiveAvatar] = useState<string | null>(userAvatar ?? null);
+  const [contactAvatars, setContactAvatars] = useState<Record<string, string | null>>({});
   const [filter, setFilter] = useState<'all' | 'unread'>('all');
   const [userId, setUserId] = useState<string | null>(null);
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
@@ -856,6 +1056,36 @@ function ChatContent() {
   const [chatError, setChatError] = useState('');
   const selectedChatIdRef = useRef<string | null>(null);
   const messageListRef = useRef<ComponentRef<typeof ScrollView>>(null);
+
+  useEffect(() => {
+    if (userAvatar) {
+      setActiveAvatar(userAvatar);
+    } else {
+      getPlayerAvatar(displayName).then((saved) => {
+        if (saved) {
+          setActiveAvatar(saved);
+        }
+      });
+    }
+  }, [userAvatar, displayName]);
+
+  useEffect(() => {
+    let active = true;
+    contacts.forEach((contact) => {
+      getPlayerAvatar(contact.name).then((avatar) => {
+        if (active && avatar) {
+          setContactAvatars((prev) => ({
+            ...prev,
+            [contact.name]: avatar,
+            [contact.id]: avatar,
+          }));
+        }
+      });
+    });
+    return () => {
+      active = false;
+    };
+  }, [contacts]);
 
   useEffect(() => {
     selectedChatIdRef.current = selectedChatId;
@@ -1001,29 +1231,34 @@ function ChatContent() {
           keyboardVerticalOffset={0}
           style={styles.chatKeyboard}>
           <View style={styles.chatHeader}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Back to messages"
-              onPress={() => {
-                selectedChatIdRef.current = null;
-                setLoadingMessages(false);
-                setSelectedChatId(null);
-                setMessages([]);
-              }}
-              style={styles.chatBackButton}>
-              <Text style={styles.chatBackArrow}>‹</Text>
-            </Pressable>
-            <View
-              style={[
-                styles.chatAvatar,
-                { backgroundColor: colorForName(conversationName, mode) },
-              ]}>
-              <Text style={styles.chatAvatarText}>{conversationName.slice(0, 1).toUpperCase()}</Text>
+            <View style={styles.chatHeaderLeft}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Back to messages"
+                onPress={() => {
+                  selectedChatIdRef.current = null;
+                  setLoadingMessages(false);
+                  setSelectedChatId(null);
+                  setMessages([]);
+                }}
+                style={styles.chatBackButton}>
+                <Text style={styles.chatBackArrow}>‹</Text>
+              </Pressable>
+              <UserAvatar
+                name={conversationName}
+                uri={
+                  contactAvatars[conversationName] ??
+                  (selectedConversation ? contactAvatars[selectedConversation.id] : undefined) ??
+                  (conversationName.toLowerCase() === displayName.toLowerCase() ? activeAvatar : undefined)
+                }
+                size={40}
+              />
+              <View style={styles.chatHeaderInfo}>
+                <Text style={styles.chatHeaderName}>{conversationName}</Text>
+                <Text style={styles.chatOnline}>Direct messages</Text>
+              </View>
             </View>
-            <View style={styles.chatHeaderInfo}>
-              <Text style={styles.chatHeaderName}>{conversationName}</Text>
-              <Text style={styles.chatOnline}>Direct messages</Text>
-            </View>
+            <UserAvatar name={displayName} uri={activeAvatar} size={36} />
           </View>
 
           <ScrollView
@@ -1037,7 +1272,7 @@ function ChatContent() {
               <Text style={styles.chatStatus}>Send a message to start the conversation.</Text>
             ) : null}
             {messages.map((message) => {
-              const outgoing = message.senderId === userId;
+              const outgoing = Boolean(userId && message.senderId === userId);
               return (
                 <View
                   key={message.id}
@@ -1045,6 +1280,18 @@ function ChatContent() {
                     styles.messageLine,
                     outgoing ? styles.outgoingMessageLine : styles.incomingMessageLine,
                   ]}>
+                  {!outgoing ? (
+                    <UserAvatar
+                      name={conversationName}
+                      uri={
+                        contactAvatars[conversationName] ??
+                        contactAvatars[message.senderId] ??
+                        (conversationName.toLowerCase() === displayName.toLowerCase() ? activeAvatar : undefined)
+                      }
+                      size={28}
+                      style={{ marginRight: 8, alignSelf: 'flex-end', marginBottom: 2 }}
+                    />
+                  ) : null}
                   <View
                     style={[
                       styles.messageBubble,
@@ -1065,6 +1312,14 @@ function ChatContent() {
                       {formatChatTime(message.createdAt)}
                     </Text>
                   </View>
+                  {outgoing ? (
+                    <UserAvatar
+                      name={displayName}
+                      uri={activeAvatar}
+                      size={28}
+                      style={{ marginLeft: 8, alignSelf: 'flex-end', marginBottom: 2 }}
+                    />
+                  ) : null}
                 </View>
               );
             })}
@@ -1121,7 +1376,10 @@ function ChatContent() {
       contentContainerStyle={styles.chatListContent}
       showsVerticalScrollIndicator={false}>
       <View style={styles.pageHeading}>
-        <Text style={styles.pageTitle}>Messages</Text>
+        <View style={styles.chatHeaderTopRow}>
+          <Text style={styles.pageTitle}>Messages</Text>
+          <UserAvatar name={displayName} uri={activeAvatar} size={38} />
+        </View>
         <Text style={styles.pageSubtitle}>Keep the conversation going</Text>
       </View>
 
@@ -1194,13 +1452,15 @@ function ChatContent() {
                 setSelectedChatId(conversation.id);
               }}
               style={styles.conversationRow}>
-              <View
-                style={[
-                  styles.chatAvatar,
-                  { backgroundColor: colorForName(conversation.name, mode) },
-                ]}>
-                <Text style={styles.chatAvatarText}>{conversation.name.slice(0, 1).toUpperCase()}</Text>
-              </View>
+              <UserAvatar
+                name={conversation.name}
+                uri={
+                  contactAvatars[conversation.name] ??
+                  contactAvatars[conversation.id] ??
+                  (conversation.name.toLowerCase() === displayName.toLowerCase() ? activeAvatar : undefined)
+                }
+                size={50}
+              />
               <View style={styles.conversationInfo}>
                 <View style={styles.conversationTopline}>
                   <Text style={styles.conversationName}>{conversation.name}</Text>
@@ -1496,35 +1756,54 @@ function SettingsIcon({ color, size = 24 }: { color: string; size?: number }) {
 function ProfileContent({
   displayName,
   tags,
+  userAvatar,
+  onPickAvatar,
+  onRemoveAvatar,
   onOpenSettings,
 }: {
   displayName: string;
   tags: string;
+  userAvatar?: string | null;
+  onPickAvatar: () => void;
+  onRemoveAvatar: () => void;
   onOpenSettings: () => void;
 }) {
   const styles = useThemedStyles(baseStyles);
   const { mode } = useAppTheme();
+  const [showAvatarMenu, setShowAvatarMenu] = useState(false);
+
+  const handleAvatarPress = () => {
+    if (userAvatar) {
+      setShowAvatarMenu(true);
+    } else {
+      onPickAvatar();
+    }
+  };
+
   return (
-    <ScrollView
-      style={styles.profileScroll}
-      contentContainerStyle={styles.profileContent}
-      showsVerticalScrollIndicator={false}>
-      <View style={styles.profileHeader}>
-        <View style={styles.avatarRing}>
-          <View style={styles.avatar}>
-            <SymbolView
-              accessibilityLabel="Profile photo placeholder"
-              name={{
-                ios: 'person.crop.circle.fill',
-                android: 'account_circle',
-                web: 'account_circle',
-              }}
-              size={88}
-              tintColor={themeColor('#FFF1DF', mode, 'tintColor')}
-              style={styles.avatarSymbol}
-            />
-          </View>
-        </View>
+    <>
+      <ScrollView
+        style={styles.profileScroll}
+        contentContainerStyle={styles.profileContent}
+        showsVerticalScrollIndicator={false}>
+        <View style={styles.profileHeader}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Change profile avatar"
+            onPress={handleAvatarPress}
+            style={styles.avatarPressable}>
+            <View style={styles.avatarRing}>
+              <UserAvatar name={displayName} uri={userAvatar} size={96} />
+            </View>
+            <View style={styles.avatarEditBadge}>
+              <SymbolView
+                accessibilityLabel="Change photo"
+                name={{ ios: 'camera.fill', android: 'photo_camera', web: 'photo_camera' }}
+                size={15}
+                tintColor={mode === 'light' ? '#FFFFFF' : '#171717'}
+              />
+            </View>
+          </Pressable>
         <Text style={styles.profileName} numberOfLines={1}>
           {displayName}
         </Text>
@@ -1622,6 +1901,61 @@ function ProfileContent({
         </Text>
       </View>
     </ScrollView>
+
+    <Modal
+      animationType="fade"
+      transparent
+      visible={showAvatarMenu}
+      onRequestClose={() => setShowAvatarMenu(false)}>
+      <Pressable
+        style={styles.participationOverlay}
+        onPress={() => setShowAvatarMenu(false)}>
+        <Pressable style={styles.participationSheet} onPress={(e) => e.stopPropagation()}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Close photo menu"
+            onPress={() => setShowAvatarMenu(false)}
+            style={({ pressed }) => [styles.closeParticipationButton, pressed && { opacity: 0.75 }]}>
+            <Text style={styles.closeParticipationText}>×</Text>
+          </Pressable>
+          <Text style={styles.participationTitle}>Profile photo</Text>
+          <Text style={styles.participationSubtitle}>{displayName}</Text>
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Choose new photo from gallery"
+            onPress={() => {
+              setShowAvatarMenu(false);
+              onPickAvatar();
+            }}
+            style={({ pressed }) => [styles.participationAction, pressed && { opacity: 0.75 }]}>
+            <SymbolView
+              name={{ ios: 'photo.on.rectangle', android: 'photo_library', web: 'photo_library' }}
+              size={22}
+              tintColor={mode === 'light' ? '#208AEF' : '#F28C28'}
+            />
+            <Text style={styles.participationActionText}>Choose from gallery</Text>
+          </Pressable>
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Remove photo"
+            onPress={() => {
+              setShowAvatarMenu(false);
+              onRemoveAvatar();
+            }}
+            style={({ pressed }) => [styles.participationAction, pressed && { opacity: 0.75 }]}>
+            <SymbolView
+              name={{ ios: 'trash.fill', android: 'delete', web: 'delete' }}
+              size={22}
+              tintColor="#E53935"
+            />
+            <Text style={[styles.participationActionText, { color: '#E53935' }]}>Remove photo</Text>
+          </Pressable>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  </>
   );
 }
 
@@ -1693,6 +2027,11 @@ const baseStyles = StyleSheet.create({
     alignItems: 'center',
     paddingTop: 10,
   },
+  avatarPressable: {
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   avatarRing: {
     width: 112,
     height: 112,
@@ -1701,6 +2040,19 @@ const baseStyles = StyleSheet.create({
     borderRadius: 56,
     borderWidth: 5,
     borderColor: '#F28C28',
+  },
+  avatarEditBadge: {
+    position: 'absolute',
+    bottom: 2,
+    right: 2,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F28C28',
+    borderWidth: 2,
+    borderColor: '#171717',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   avatar: {
     width: 96,
@@ -1990,6 +2342,11 @@ const baseStyles = StyleSheet.create({
   pageHeading: {
     marginBottom: 18,
   },
+  chatHeaderTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   pageTitle: {
     color: '#F3F0EB',
     fontSize: 27,
@@ -2211,6 +2568,34 @@ const baseStyles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 12,
+  },
+  battlesHeaderTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  battleHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  battleCreatorBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  battleCreatorText: {
+    color: '#AAA39A',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  battleCreatorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+    marginBottom: 4,
   },
   battlesTitle: {
     color: '#F3F0EB',
@@ -2771,9 +3156,16 @@ const baseStyles = StyleSheet.create({
     minHeight: 68,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 14,
     borderBottomWidth: 1,
     borderBottomColor: '#F2E3D0',
+  },
+  chatHeaderLeft: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 10,
   },
   chatBackButton: {
     width: 34,
