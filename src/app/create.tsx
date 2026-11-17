@@ -16,22 +16,25 @@ import Animated, {
 import Svg, { Path } from 'react-native-svg';
 
 import { saveCreatedBattle, type UserBattle } from '@/lib/battles';
+import { themeColor, useAppTheme, useThemedStyles } from '@/components/app-theme-provider';
 
 const categories = ['sport', 'photo', 'art', 'music', 'gaming', 'food', 'other'] as const;
 const durations = ['1 day', '3 days', 'week'] as const;
 const votingOptions = ['everyone', 'followers'] as const;
 
-// Increase duration for slower motion; distance, rotation, and scale control intensity.
+// Shorter durations create faster motion; distance, rotation, and scale control intensity.
 const WAVE_MOTION = {
-  topBase: { duration: 12_000, distance: 14, rotation: 1.1, scale: 1.025, direction: 1 },
-  topPeach: { duration: 9_000, distance: 18, rotation: 1.3, scale: 1.04, direction: 1 },
-  topOrange: { duration: 14_000, distance: 16, rotation: 1.2, scale: 1.035, direction: 1 },
-  bottomBase: { duration: 19_000, distance: 14, rotation: 1, scale: 1.03, direction: -1 },
-  bottomPeach: { duration: 17_000, distance: 13, rotation: 1, scale: 1.025, direction: -1 },
-  bottomOrange: { duration: 10_000, distance: 18, rotation: 1.3, scale: 1.04, direction: -1 },
+  topBase: { duration: 6_000, distance: 14, rotation: 1.1, scale: 1.025, direction: 1 },
+  topPeach: { duration: 4_500, distance: 18, rotation: 1.3, scale: 1.04, direction: 1 },
+  topOrange: { duration: 7_000, distance: 16, rotation: 1.2, scale: 1.035, direction: 1 },
+  bottomBase: { duration: 9_500, distance: 14, rotation: 1, scale: 1.03, direction: -1 },
+  bottomPeach: { duration: 8_500, distance: 13, rotation: 1, scale: 1.025, direction: -1 },
+  bottomOrange: { duration: 5_000, distance: 18, rotation: 1.3, scale: 1.04, direction: -1 },
 } as const;
 
 export default function CreateScreen() {
+  const styles = useThemedStyles(baseStyles);
+  const { mode } = useAppTheme();
   const router = useRouter();
   const { nickname } = useLocalSearchParams<{ nickname?: string }>();
   const insets = useSafeAreaInsets();
@@ -43,6 +46,7 @@ export default function CreateScreen() {
   const [category, setCategory] = useState<(typeof categories)[number] | null>(null);
   const [duration, setDuration] = useState<(typeof durations)[number] | null>(null);
   const [voting, setVoting] = useState<(typeof votingOptions)[number] | null>(null);
+  const isCreateDisabled = !title.trim() || !category || !duration || !voting;
 
   const createBattle = async () => {
     const owner = typeof nickname === 'string' && nickname.trim() ? nickname.trim() : 'Player';
@@ -82,10 +86,6 @@ export default function CreateScreen() {
     throw fontError;
   }
 
-  if (!fontsLoaded) {
-    return null;
-  }
-
   return (
     <View style={styles.screen}>
       <StatusBar hidden />
@@ -118,7 +118,7 @@ export default function CreateScreen() {
             accessibilityLabel="Battle title"
             onChangeText={setTitle}
             placeholder="enter your title"
-            placeholderTextColor="#B9A58E"
+            placeholderTextColor={themeColor('#999999', mode)}
             style={styles.titleInput}
             value={title}
           />
@@ -145,7 +145,7 @@ export default function CreateScreen() {
             multiline
             onChangeText={setRules}
             placeholder="what should people submit?"
-            placeholderTextColor="#B9A58E"
+            placeholderTextColor={themeColor('#999999', mode)}
             style={styles.rulesInput}
             textAlignVertical="top"
             value={rules}
@@ -187,14 +187,21 @@ export default function CreateScreen() {
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Create battle"
-          disabled={!title.trim() || !category || !duration || !voting}
+          disabled={isCreateDisabled}
           onPress={createBattle}
           style={({ pressed }) => [
             styles.createButton,
-            (!title.trim() || !category || !duration || !voting) && styles.disabledCreateButton,
+            isCreateDisabled && styles.disabledCreateButton,
             pressed && styles.pressed,
           ]}>
-          <Text style={styles.createButtonText}>Create</Text>
+          <Text
+            style={[
+              styles.createButtonText,
+              isCreateDisabled && styles.disabledCreateButtonText,
+              fontsLoaded && styles.loadedCreateButtonText,
+            ]}>
+            Create
+          </Text>
         </Pressable>
       </View>
     </View>
@@ -202,36 +209,38 @@ export default function CreateScreen() {
 }
 
 function WaveBackground() {
+  const styles = useThemedStyles(baseStyles);
+  const { mode } = useAppTheme();
   return (
     <View pointerEvents="none" style={styles.backgroundWaves}>
       <AnimatedWaveLayer
         path="M0 0h402v18c-48 21-62 54-122 53-61-1-77-38-137-27C74 54 37 96 0 109V0Z"
-        fill="#F9DFC9"
+        fill={themeColor('#181818', mode, 'fill')}
         motion={WAVE_MOTION.topBase}
       />
       <AnimatedWaveLayer
         path="M0 0h282c-37 34-65 59-115 79C96 94 43 90 0 142V0Z"
-        fill="#EFA96F"
+        fill={themeColor('#29231D', mode, 'fill')}
         motion={WAVE_MOTION.topPeach}
       />
       <AnimatedWaveLayer
         path="M0 0h402v25c-37 22-65 54-122 49C216 69 192 29 136 40 77 51 35 102 0 128V0Z"
-        fill="#E9904D"
+        fill={themeColor('#F28C28', mode, 'fill')}
         motion={WAVE_MOTION.topOrange}
       />
       <AnimatedWaveLayer
         path="M0 698c45 27 81 20 130 12 53-8 78-12 126 1 54 15 83 21 146-8v171H0V698Z"
-        fill="#F3C39B"
+        fill={themeColor('#181818', mode, 'fill')}
         motion={WAVE_MOTION.bottomBase}
       />
       <AnimatedWaveLayer
         path="M0 748c44-12 68-43 114-44 53-2 86 43 145 38 59-6 79-47 143-43v175H0V748Z"
-        fill="#EBAA72"
+        fill={themeColor('#29231D', mode, 'fill')}
         motion={WAVE_MOTION.bottomOrange}
       />
       <AnimatedWaveLayer
         path="M0 796c64-13 101-26 159-17 63 10 101 35 155 21 34-9 58-26 88-29v103H0V796Z"
-        fill="#F7D8BF"
+        fill={themeColor('#242424', mode, 'fill')}
         motion={WAVE_MOTION.bottomPeach}
       />
     </View>
@@ -247,6 +256,7 @@ function AnimatedWaveLayer({
   fill: string;
   motion: (typeof WAVE_MOTION)[keyof typeof WAVE_MOTION];
 }) {
+  const styles = useThemedStyles(baseStyles);
   const reduceMotion = useReducedMotion();
   const progress = useSharedValue(0);
 
@@ -319,6 +329,7 @@ function OptionPill({
   onPress: () => void;
   style?: object;
 }) {
+  const styles = useThemedStyles(baseStyles);
   return (
     <Pressable
       accessibilityRole="button"
@@ -335,10 +346,10 @@ function OptionPill({
   );
 }
 
-const styles = StyleSheet.create({
+const baseStyles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#171717',
   },
   backgroundWaves: {
     position: 'absolute',
@@ -377,23 +388,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 30,
-    backgroundColor: '#E9904D',
-    shadowColor: '#8D7967',
+    backgroundColor: '#F28C28',
+    shadowColor: '#706050',
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.18,
     shadowRadius: 6,
     elevation: 4,
   },
   disabledCreateButton: {
-    backgroundColor: '#D6C8BD',
+    backgroundColor: '#3A3530',
     shadowOpacity: 0,
     elevation: 0,
   },
+  disabledCreateButtonText: {
+    color: '#AAA39A',
+  },
   createButtonText: {
-    color: '#FFFFFF',
-    fontFamily: 'NationalPark',
+    color: '#171717',
     fontSize: 18,
     letterSpacing: 0.3,
+  },
+  loadedCreateButtonText: {
+    fontFamily: 'NationalPark',
   },
   backButton: {
     width: 56,
@@ -401,8 +417,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 28,
-    backgroundColor: '#FFFFFF',
-    shadowColor: '#8D7967',
+    backgroundColor: '#171717',
+    shadowColor: '#706050',
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.12,
     shadowRadius: 6,
@@ -410,14 +426,14 @@ const styles = StyleSheet.create({
   },
   backText: {
     marginTop: -4,
-    color: '#76563F',
+    color: '#F3F0EB',
     fontSize: 44,
     fontWeight: '300',
   },
   screenTitle: {
     marginTop: 16,
     marginBottom: 38,
-    color: '#D9772D',
+    color: '#FFAA45',
     fontSize: 29,
     fontWeight: '500',
     textAlign: 'center',
@@ -427,7 +443,7 @@ const styles = StyleSheet.create({
   },
   sectionLabel: {
     marginBottom: 10,
-    color: '#C77A3E',
+    color: '#F5A047',
     fontSize: 17,
     fontWeight: '500',
     textAlign: 'center',
@@ -436,10 +452,10 @@ const styles = StyleSheet.create({
     minHeight: 54,
     paddingHorizontal: 20,
     borderRadius: 28,
-    backgroundColor: '#FFF2EB',
-    color: '#76563F',
+    backgroundColor: '#222222',
+    color: '#F3F0EB',
     fontSize: 15,
-    shadowColor: '#8D7967',
+    shadowColor: '#706050',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
@@ -463,22 +479,22 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 18,
     borderRadius: 24,
-    backgroundColor: '#FFF2EB',
-    shadowColor: '#8D7967',
+    backgroundColor: '#222222',
+    shadowColor: '#706050',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 2,
   },
   selectedOptionPill: {
-    backgroundColor: '#E9904D',
+    backgroundColor: '#F28C28',
   },
   optionText: {
-    color: '#B9A58E',
+    color: '#AAA39A',
     fontSize: 15,
   },
   selectedOptionText: {
-    color: '#FFFFFF',
+    color: '#171717',
     fontWeight: '600',
   },
   rulesInput: {
@@ -486,10 +502,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 16,
     borderRadius: 24,
-    backgroundColor: '#FFF2EB',
-    color: '#76563F',
+    backgroundColor: '#222222',
+    color: '#F3F0EB',
     fontSize: 15,
-    shadowColor: '#8D7967',
+    shadowColor: '#706050',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,

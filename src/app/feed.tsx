@@ -23,6 +23,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path } from 'react-native-svg';
 
 import { PlayerSettings } from '@/components/player-settings';
+import { themeColor, useAppTheme, useThemedStyles } from '@/components/app-theme-provider';
 import { getMineData, setBattlePinned, type UserBattle } from '@/lib/battles';
 import {
   getDirectMessages,
@@ -119,7 +120,7 @@ const endedGames = [
     votes: 77,
     comments: 0,
     artwork: '🎮',
-    artworkColor: '#B8E8C6',
+    artworkColor: '#252525',
   },
   {
     id: 'jump-rope-ended',
@@ -130,11 +131,13 @@ const endedGames = [
     votes: 156,
     comments: 3,
     artwork: '🏀',
-    artworkColor: '#FFD276',
+    artworkColor: '#332416',
   },
 ] as const;
 
 export default function FeedScreen() {
+  const styles = useThemedStyles(baseStyles);
+  const { mode } = useAppTheme();
   const [activeTab, setActiveTab] = useState<FeedTabId>('home');
   const [battleStatus, setBattleStatus] = useState<BattleStatus>('live');
   const [pinnedBattleIds, setPinnedBattleIds] = useState<string[]>([]);
@@ -222,7 +225,7 @@ export default function FeedScreen() {
                     <Path
                       d="M24 13v22M13 24h22"
                       fill="none"
-                      stroke="#FFFFFF"
+                      stroke={mode === 'light' ? '#FFFFFF' : '#171717'}
                       strokeLinecap="round"
                       strokeWidth={3.5}
                     />
@@ -240,18 +243,20 @@ export default function FeedScreen() {
 }
 
 function LeaderboardContent({ displayName }: { displayName: string }) {
+  const styles = useThemedStyles(baseStyles);
+  const { mode } = useAppTheme();
   const [period, setPeriod] = useState<'week' | 'all-time'>('week');
   const topPlayers =
     period === 'week'
       ? [
-          { name: 'Emma', score: '2,840', rank: 2, color: '#D5A27C' },
-          { name: 'Alex', score: '3,120', rank: 1, color: '#E89550' },
-          { name: 'Dani', score: '2,610', rank: 3, color: '#A8A08E' },
+          { name: 'Emma', score: '2,840', rank: 2, color: themeColor('#FFC477', mode) },
+          { name: 'Alex', score: '3,120', rank: 1, color: themeColor('#F28C28', mode) },
+          { name: 'Dani', score: '2,610', rank: 3, color: '#A8A8A8' },
         ]
       : [
-          { name: 'Mila', score: '12,840', rank: 2, color: '#D5A27C' },
-          { name: 'Alex', score: '15,320', rank: 1, color: '#E89550' },
-          { name: 'Dani', score: '11,610', rank: 3, color: '#A8A08E' },
+          { name: 'Mila', score: '12,840', rank: 2, color: themeColor('#FFC477', mode) },
+          { name: 'Alex', score: '15,320', rank: 1, color: themeColor('#F28C28', mode) },
+          { name: 'Dani', score: '11,610', rank: 3, color: '#A8A8A8' },
         ];
   const otherPlayers =
     period === 'week'
@@ -365,6 +370,7 @@ function HomeContent({
   createdBattles: UserBattle[];
   onTogglePin: (battleId: string, pinned: boolean) => void;
 }) {
+  const styles = useThemedStyles(baseStyles);
   const [selectedCategory, setSelectedCategory] = useState<BattleCategory>('All');
   const visibleLiveBattles =
     selectedCategory === 'All'
@@ -542,6 +548,8 @@ function EndedGameCard({
   pinned: boolean;
   onTogglePin: (battleId: string, pinned: boolean) => void;
 }) {
+  const styles = useThemedStyles(baseStyles);
+  const { mode } = useAppTheme();
   const [hasVoted, setHasVoted] = useState(false);
 
   return (
@@ -562,7 +570,11 @@ function EndedGameCard({
         </Text>
       </View>
 
-      <View style={[styles.endedArtwork, { backgroundColor: game.artworkColor }]}>
+      <View
+        style={[
+          styles.endedArtwork,
+          { backgroundColor: themeColor(game.artworkColor, mode, 'backgroundColor') },
+        ]}>
         <View style={styles.endedRankBadge}>
           <Text style={styles.endedRankText}>#1</Text>
         </View>
@@ -587,7 +599,7 @@ function EndedGameCard({
               accessibilityLabel="Comments"
               name={{ ios: 'bubble.right', android: 'chat_bubble_outline', web: 'chat_bubble_outline' }}
               size={17}
-              tintColor="#B69478"
+              tintColor={themeColor('#888888', mode, 'tintColor')}
             />
             <Text style={styles.endedCommentText}>{game.comments}</Text>
           </View>
@@ -604,6 +616,7 @@ function CreatedBattleCard({
   battle: UserBattle;
   onTogglePin: (battleId: string, pinned: boolean) => void;
 }) {
+  const styles = useThemedStyles(baseStyles);
   return (
     <View style={styles.battleCard}>
       <PinButton pinned onPress={() => onTogglePin(battle.id, false)} />
@@ -619,6 +632,8 @@ function CreatedBattleCard({
 }
 
 function PinButton({ pinned, onPress }: { pinned: boolean; onPress: () => void }) {
+  const styles = useThemedStyles(baseStyles);
+  const { mode } = useAppTheme();
   return (
     <Pressable
       accessibilityRole="button"
@@ -629,7 +644,7 @@ function PinButton({ pinned, onPress }: { pinned: boolean; onPress: () => void }
       <SymbolView
         name={{ ios: pinned ? 'pin.fill' : 'pin', android: 'push_pin', web: 'push_pin' }}
         size={18}
-        tintColor={pinned ? '#E7842D' : '#B8A99D'}
+        tintColor={themeColor(pinned ? '#D96B0B' : '#999999', mode, 'tintColor')}
       />
     </Pressable>
   );
@@ -644,6 +659,7 @@ function PeriodButton({
   selected: boolean;
   onPress: () => void;
 }) {
+  const styles = useThemedStyles(baseStyles);
   return (
     <Pressable
       accessibilityRole="button"
@@ -658,6 +674,8 @@ function PeriodButton({
 }
 
 function ChatContent() {
+  const styles = useThemedStyles(baseStyles);
+  const { mode } = useAppTheme();
   const [filter, setFilter] = useState<'all' | 'unread'>('all');
   const [userId, setUserId] = useState<string | null>(null);
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
@@ -829,7 +847,11 @@ function ChatContent() {
               style={styles.chatBackButton}>
               <Text style={styles.chatBackArrow}>‹</Text>
             </Pressable>
-            <View style={[styles.chatAvatar, { backgroundColor: colorForName(conversationName) }]}>
+            <View
+              style={[
+                styles.chatAvatar,
+                { backgroundColor: colorForName(conversationName, mode) },
+              ]}>
               <Text style={styles.chatAvatarText}>{conversationName.slice(0, 1).toUpperCase()}</Text>
             </View>
             <View style={styles.chatHeaderInfo}>
@@ -888,7 +910,7 @@ function ChatContent() {
               accessibilityLabel="Write a message"
               maxLength={4000}
               placeholder="Write a message..."
-              placeholderTextColor="#B6A493"
+              placeholderTextColor={themeColor('#999999', mode)}
               returnKeyType="send"
               onChangeText={setDraft}
               onSubmitEditing={() => void sendMessage()}
@@ -904,7 +926,13 @@ function ChatContent() {
                 styles.sendButton,
                 (!draft.trim() || sending) && styles.disabledSendButton,
               ]}>
-              <Text style={styles.sendButtonText}>{sending ? '…' : '↑'}</Text>
+              <Text
+                style={[
+                  styles.sendButtonText,
+                  (!draft.trim() || sending) && styles.disabledSendButtonText,
+                ]}>
+                {sending ? '…' : '↑'}
+              </Text>
             </Pressable>
           </View>
         </KeyboardAvoidingView>
@@ -936,13 +964,13 @@ function ChatContent() {
           accessibilityLabel="Search messages"
           name={{ ios: 'magnifyingglass', android: 'search', web: 'search' }}
           size={19}
-          tintColor="#E89550"
+          tintColor={themeColor('#F28C28', mode, 'tintColor')}
           style={styles.chatSearchIcon}
         />
         <TextInput
           accessibilityLabel="Search conversations"
           placeholder="Search messages"
-          placeholderTextColor="#B6A493"
+          placeholderTextColor={themeColor('#999999', mode)}
           onChangeText={setSearch}
           style={styles.chatSearchInput}
           value={search}
@@ -1000,7 +1028,11 @@ function ChatContent() {
                 setSelectedChatId(conversation.id);
               }}
               style={styles.conversationRow}>
-              <View style={[styles.chatAvatar, { backgroundColor: colorForName(conversation.name) }]}>
+              <View
+                style={[
+                  styles.chatAvatar,
+                  { backgroundColor: colorForName(conversation.name, mode) },
+                ]}>
                 <Text style={styles.chatAvatarText}>{conversation.name.slice(0, 1).toUpperCase()}</Text>
               </View>
               <View style={styles.conversationInfo}>
@@ -1036,10 +1068,10 @@ function ChatContent() {
   );
 }
 
-function colorForName(name: string) {
-  const colors = ['#E89550', '#A8A08E', '#C77A61', '#8E9C78', '#9B83A8'];
+function colorForName(name: string, mode: 'light' | 'dark') {
+  const colors = ['#F28C28', '#A8A8A8', '#F5B565', '#888888', '#888888'];
   const colorIndex = name.split('').reduce((sum, character) => sum + character.charCodeAt(0), 0);
-  return colors[colorIndex % colors.length];
+  return themeColor(colors[colorIndex % colors.length], mode, 'backgroundColor');
 }
 
 function formatChatTime(timestamp: string) {
@@ -1059,8 +1091,9 @@ function formatInboxTime(timestamp: string) {
 }
 
 function LineIcon({ type, active }: { type: Exclude<FeedTabId, 'create'>; active: boolean }) {
-  const color = active ? '#E89550' : '#A3A3A3';
-  const fill = active ? '#FCE4D1' : '#E5E5E5';
+  const { mode } = useAppTheme();
+  const color = themeColor(active ? '#F28C28' : '#A3A3A3', mode);
+  const fill = themeColor(active ? '#FFE6C7' : '#E5E5E5', mode, 'fill');
 
   if (type === 'challenges') {
     return (
@@ -1096,7 +1129,7 @@ function LineIcon({ type, active }: { type: Exclude<FeedTabId, 'create'>; active
         />
         <Path
           d="M18 39V28a6 6 0 0 1 12 0v11"
-          fill="#FFFFFF"
+          fill={themeColor('#171717', mode, 'fill')}
           stroke={color}
           strokeLinejoin="round"
           strokeWidth={3.5}
@@ -1119,7 +1152,7 @@ function LineIcon({ type, active }: { type: Exclude<FeedTabId, 'create'>; active
           cx={37}
           cy={10}
           r={6}
-          fill={active ? '#FCE4D1' : '#FFFFFF'}
+          fill={themeColor(active ? '#3A2919' : '#171717', mode, 'fill')}
           stroke={color}
           strokeWidth={3}
         />
@@ -1130,10 +1163,17 @@ function LineIcon({ type, active }: { type: Exclude<FeedTabId, 'create'>; active
   return (
     <Svg width={40} height={40} viewBox="0 0 48 48">
       <Circle cx={24} cy={24} r={18} fill={fill} stroke={color} strokeWidth={3.5} />
-      <Circle cx={24} cy={18} r={6} fill="#FFFFFF" stroke={color} strokeWidth={3} />
+      <Circle
+        cx={24}
+        cy={18}
+        r={6}
+        fill={themeColor('#171717', mode, 'fill')}
+        stroke={color}
+        strokeWidth={3}
+      />
       <Path
         d="M13 37c.8-6 5-9 11-9s10.2 3 11 9"
-        fill="#FFFFFF"
+        fill={themeColor('#171717', mode, 'fill')}
         stroke={color}
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -1150,6 +1190,8 @@ function ProfileContent({
   displayName: string;
   onOpenSettings: () => void;
 }) {
+  const styles = useThemedStyles(baseStyles);
+  const { mode } = useAppTheme();
   return (
     <ScrollView
       style={styles.profileScroll}
@@ -1166,7 +1208,7 @@ function ProfileContent({
                 web: 'account_circle',
               }}
               size={88}
-              tintColor="#F4E9DE"
+              tintColor={themeColor('#FFF1DF', mode, 'tintColor')}
               style={styles.avatarSymbol}
             />
           </View>
@@ -1184,7 +1226,7 @@ function ProfileContent({
           <SymbolView
             name={{ ios: 'slider.horizontal.3', android: 'tune', web: 'tune' }}
             size={22}
-            tintColor="#C96B30"
+            tintColor={themeColor('#C96A13', mode, 'tintColor')}
             style={styles.settingsIcon}
           />
         </Pressable>
@@ -1198,7 +1240,7 @@ function ProfileContent({
               accessibilityLabel="Streak"
               name={{ ios: 'flame.fill', android: 'local_fire_department', web: 'local_fire_department' }}
               size={22}
-              tintColor="#F04438"
+              tintColor={themeColor('#F28C28', mode, 'tintColor')}
               style={styles.streakIcon}
             />
             <Text style={styles.streakText}>4-day streak</Text>
@@ -1253,7 +1295,7 @@ function ProfileContent({
           accessibilityLabel="Pinned photos"
           name={{ ios: 'pin.fill', android: 'push_pin', web: 'push_pin' }}
           size={18}
-          tintColor="#E9803F"
+          tintColor={themeColor('#F28C28', mode, 'tintColor')}
           style={styles.pinnedIcon}
         />
       </View>
@@ -1263,7 +1305,7 @@ function ProfileContent({
             accessibilityLabel="Photo collection"
             name={{ ios: 'photo.on.rectangle.angled', android: 'photo_library', web: 'photo_library' }}
             size={28}
-            tintColor="#E9803F"
+            tintColor={themeColor('#F28C28', mode, 'tintColor')}
             style={styles.pinnedPhotosIcon}
           />
         </View>
@@ -1285,6 +1327,8 @@ function AchievementBadge({
   label: string;
   unlocked?: boolean;
 }) {
+  const styles = useThemedStyles(baseStyles);
+  const { mode } = useAppTheme();
   return (
     <View
       accessibilityLabel={`${label}, ${unlocked ? 'unlocked' : 'locked'}`}
@@ -1297,7 +1341,7 @@ function AchievementBadge({
         <SymbolView
           name={icon}
           size={23}
-          tintColor={unlocked ? '#FFFFFF' : '#C6B9AC'}
+          tintColor={themeColor(unlocked ? '#171717' : '#A8A8A8', mode, 'tintColor')}
           style={styles.achievementIcon}
         />
       </View>
@@ -1313,6 +1357,7 @@ function AchievementBadge({
 }
 
 function ProfileStat({ value, label }: { value: string; label: string }) {
+  const styles = useThemedStyles(baseStyles);
   return (
     <View style={styles.statCard}>
       <Text style={styles.statValue}>{value}</Text>
@@ -1321,13 +1366,13 @@ function ProfileStat({ value, label }: { value: string; label: string }) {
   );
 }
 
-const styles = StyleSheet.create({
+const baseStyles = StyleSheet.create({
   screen: {
     flex: 1,
     width: '100%',
     maxWidth: 402,
     alignSelf: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#171717',
   },
   profileScroll: {
     flex: 1,
@@ -1348,7 +1393,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: 56,
     borderWidth: 5,
-    borderColor: '#E89550',
+    borderColor: '#F28C28',
   },
   avatar: {
     width: 96,
@@ -1357,7 +1402,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     overflow: 'hidden',
     borderRadius: 48,
-    backgroundColor: '#A49C8C',
+    backgroundColor: '#A8A8A8',
   },
   avatarSymbol: {
     width: 90,
@@ -1366,12 +1411,12 @@ const styles = StyleSheet.create({
   profileName: {
     maxWidth: '90%',
     marginTop: 8,
-    color: '#171717',
+    color: '#F3F0EB',
     fontSize: 23,
   },
   profileTags: {
     marginTop: 4,
-    color: '#929292',
+    color: '#AAA39A',
     fontSize: 17,
   },
   settingsButton: {
@@ -1383,10 +1428,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: '#F2D1B8',
+    borderColor: '#49321F',
     borderRadius: 23,
-    backgroundColor: '#FFF3E9',
-    shadowColor: '#8D7967',
+    backgroundColor: '#242424',
+    shadowColor: '#706050',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.12,
     shadowRadius: 4,
@@ -1404,8 +1449,8 @@ const styles = StyleSheet.create({
     marginTop: 24,
     padding: 18,
     borderRadius: 34,
-    backgroundColor: '#FFF2EB',
-    shadowColor: '#8D7967',
+    backgroundColor: '#222222',
+    shadowColor: '#706050',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.14,
     shadowRadius: 5,
@@ -1421,7 +1466,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 16,
-    backgroundColor: '#FFF8F3',
+    backgroundColor: '#202020',
   },
   emptyMineCard: {
     alignItems: 'center',
@@ -1429,26 +1474,26 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingVertical: 36,
     borderRadius: 22,
-    backgroundColor: '#FFF8F3',
+    backgroundColor: '#202020',
   },
   emptyMineIcon: {
     fontSize: 30,
   },
   emptyMineTitle: {
     marginTop: 12,
-    color: '#44372F',
+    color: '#F3F0EB',
     fontSize: 17,
     fontWeight: '700',
   },
   emptyMineText: {
     marginTop: 6,
-    color: '#9B8C7F',
+    color: '#AAA39A',
     fontSize: 13,
     textAlign: 'center',
   },
   createdByText: {
     marginTop: 8,
-    color: '#D68140',
+    color: '#F5A047',
     fontSize: 12,
     fontWeight: '600',
   },
@@ -1459,7 +1504,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   levelTitle: {
-    color: '#E9803F',
+    color: '#F28C28',
     fontSize: 19,
     fontWeight: '600',
   },
@@ -1473,26 +1518,26 @@ const styles = StyleSheet.create({
     height: 24,
   },
   streakText: {
-    color: '#E9803F',
+    color: '#F28C28',
     fontSize: 14,
   },
   progressTrack: {
     height: 18,
     overflow: 'hidden',
     borderWidth: 2,
-    borderColor: '#E89550',
+    borderColor: '#F28C28',
     borderRadius: 12,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#171717',
   },
   progressFill: {
     width: '69%',
     height: '100%',
     borderRadius: 10,
-    backgroundColor: '#F98C3E',
+    backgroundColor: '#F28C28',
   },
   levelDescription: {
     marginTop: 12,
-    color: '#8A4B2B',
+    color: '#F5A047',
     fontSize: 12,
   },
   statsRow: {
@@ -1507,21 +1552,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 26,
-    backgroundColor: '#FFFFFF',
-    shadowColor: '#8D7967',
+    backgroundColor: '#171717',
+    shadowColor: '#706050',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.14,
     shadowRadius: 4,
     elevation: 3,
   },
   statValue: {
-    color: '#E9803F',
+    color: '#F28C28',
     fontSize: 20,
     fontWeight: '600',
   },
   statLabel: {
     marginTop: 2,
-    color: '#858585',
+    color: '#AAA39A',
     fontSize: 14,
   },
   profileSectionHeader: {
@@ -1532,12 +1577,12 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   profileSectionTitle: {
-    color: '#44372F',
+    color: '#F3F0EB',
     fontSize: 18,
     fontWeight: '700',
   },
   achievementCount: {
-    color: '#C77A3E',
+    color: '#F5A047',
     fontSize: 12,
     fontWeight: '600',
   },
@@ -1547,9 +1592,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 16,
     borderWidth: 1,
-    borderColor: '#F3D6BE',
+    borderColor: '#49321F',
     borderRadius: 24,
-    backgroundColor: '#FFFAF6',
+    backgroundColor: '#202020',
   },
   achievementBadge: {
     flex: 1,
@@ -1563,12 +1608,12 @@ const styles = StyleSheet.create({
     borderRadius: 24,
   },
   unlockedAchievement: {
-    backgroundColor: '#F98C3E',
+    backgroundColor: '#F28C28',
   },
   lockedAchievement: {
     borderWidth: 1.5,
-    borderColor: '#E7DCD2',
-    backgroundColor: '#F8F3EF',
+    borderColor: '#39332D',
+    backgroundColor: '#202020',
   },
   achievementIcon: {
     width: 25,
@@ -1577,13 +1622,13 @@ const styles = StyleSheet.create({
   achievementLabel: {
     maxWidth: 76,
     marginTop: 7,
-    color: '#76563F',
+    color: '#F3F0EB',
     fontSize: 11,
     lineHeight: 14,
     textAlign: 'center',
   },
   lockedAchievementLabel: {
-    color: '#A99C91',
+    color: '#AAA39A',
   },
   pinnedPhotosHeader: {
     flexDirection: 'row',
@@ -1601,9 +1646,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 18,
     borderWidth: 1,
-    borderColor: '#F3D6BE',
+    borderColor: '#49321F',
     borderRadius: 24,
-    backgroundColor: '#FFFAF6',
+    backgroundColor: '#202020',
   },
   pinnedPhotosIconWrap: {
     width: 52,
@@ -1611,7 +1656,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 26,
-    backgroundColor: '#FFF0E4',
+    backgroundColor: '#29231D',
   },
   pinnedPhotosIcon: {
     width: 30,
@@ -1619,7 +1664,7 @@ const styles = StyleSheet.create({
   },
   pinnedPhotosTitle: {
     marginTop: 10,
-    color: '#5D4635',
+    color: '#F3F0EB',
     fontSize: 14,
     fontWeight: '600',
     textAlign: 'center',
@@ -1627,7 +1672,7 @@ const styles = StyleSheet.create({
   pinnedPhotosDescription: {
     maxWidth: 270,
     marginTop: 4,
-    color: '#9B8774',
+    color: '#AAA39A',
     fontSize: 12,
     lineHeight: 17,
     textAlign: 'center',
@@ -1639,13 +1684,13 @@ const styles = StyleSheet.create({
     marginBottom: 18,
   },
   pageTitle: {
-    color: '#24201D',
+    color: '#F3F0EB',
     fontSize: 27,
     fontWeight: '600',
   },
   pageSubtitle: {
     marginTop: 4,
-    color: '#9B8C7F',
+    color: '#AAA39A',
     fontSize: 14,
   },
   periodButton: {
@@ -1657,14 +1702,14 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   selectedPeriodButton: {
-    backgroundColor: '#E89550',
+    backgroundColor: '#F28C28',
   },
   periodButtonText: {
-    color: '#9B8C7F',
+    color: '#AAA39A',
     fontSize: 14,
   },
   selectedPeriodButtonText: {
-    color: '#FFFFFF',
+    color: '#171717',
     fontWeight: '600',
   },
   leaderboardContent: {
@@ -1677,7 +1722,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     padding: 4,
     borderRadius: 22,
-    backgroundColor: '#FFF2EB',
+    backgroundColor: '#222222',
   },
   podium: {
     height: 194,
@@ -1704,31 +1749,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 3,
-    borderColor: '#FFFFFF',
+    borderColor: '#393939',
     borderRadius: 24,
   },
   winnerAvatar: {
     width: 58,
     height: 58,
     borderWidth: 3,
-    borderColor: '#F6C28E',
+    borderColor: '#FFD7A3',
     borderRadius: 29,
   },
   podiumInitial: {
-    color: '#FFFFFF',
+    color: '#171717',
     fontSize: 19,
     fontWeight: '600',
   },
   podiumName: {
     maxWidth: '100%',
     marginTop: 6,
-    color: '#44372F',
+    color: '#F3F0EB',
     fontSize: 14,
     fontWeight: '600',
   },
   podiumScore: {
     marginTop: 2,
-    color: '#A18F80',
+    color: '#AAA39A',
     fontSize: 11,
   },
   podiumStep: {
@@ -1741,14 +1786,14 @@ const styles = StyleSheet.create({
   },
   firstPlaceStep: {
     height: 70,
-    backgroundColor: '#FCE4D1',
+    backgroundColor: '#3A2919',
   },
   otherPlaceStep: {
     height: 52,
-    backgroundColor: '#F5F0EB',
+    backgroundColor: '#202020',
   },
   podiumRank: {
-    color: '#D68140',
+    color: '#F5A047',
     fontSize: 22,
     fontWeight: '700',
   },
@@ -1760,9 +1805,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderWidth: 1.5,
-    borderColor: '#F0B37C',
+    borderColor: '#FFD8A8',
     borderRadius: 22,
-    backgroundColor: '#FFF8F3',
+    backgroundColor: '#202020',
   },
   rankNumber: {
     width: 42,
@@ -1770,10 +1815,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 21,
-    backgroundColor: '#FCE4D1',
+    backgroundColor: '#3A2919',
   },
   rankNumberText: {
-    color: '#D68140',
+    color: '#F5A047',
     fontSize: 14,
     fontWeight: '700',
   },
@@ -1782,46 +1827,46 @@ const styles = StyleSheet.create({
     marginLeft: 10,
   },
   rankPlayerName: {
-    color: '#44372F',
+    color: '#F3F0EB',
     fontSize: 15,
     fontWeight: '600',
   },
   youLabel: {
-    color: '#E89550',
+    color: '#F28C28',
     fontWeight: '400',
   },
   rankPlayerSubtext: {
     marginTop: 2,
-    color: '#9B8C7F',
+    color: '#AAA39A',
     fontSize: 11,
   },
   rankPoints: {
-    color: '#D68140',
+    color: '#F5A047',
     fontSize: 13,
     fontWeight: '600',
   },
   listHeading: {
     marginTop: 22,
     marginBottom: 8,
-    color: '#44372F',
+    color: '#F3F0EB',
     fontSize: 17,
     fontWeight: '600',
   },
   rankingList: {
     paddingHorizontal: 12,
     borderRadius: 22,
-    backgroundColor: '#FFF8F3',
+    backgroundColor: '#202020',
   },
   rankingRow: {
     minHeight: 58,
     flexDirection: 'row',
     alignItems: 'center',
     borderBottomWidth: 1,
-    borderBottomColor: '#F3E9E1',
+    borderBottomColor: '#F2E3D0',
   },
   rankingPlace: {
     width: 28,
-    color: '#9B8C7F',
+    color: '#AAA39A',
     fontSize: 14,
     fontWeight: '600',
   },
@@ -1831,21 +1876,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 17,
-    backgroundColor: '#E7D5C6',
+    backgroundColor: '#332719',
   },
   rankingInitial: {
-    color: '#8E674B',
+    color: '#D2CCC4',
     fontSize: 14,
     fontWeight: '600',
   },
   rankingName: {
     flex: 1,
     marginLeft: 10,
-    color: '#44372F',
+    color: '#F3F0EB',
     fontSize: 14,
   },
   rankingScore: {
-    color: '#9B8C7F',
+    color: '#AAA39A',
     fontSize: 12,
   },
   battlesContent: {
@@ -1861,7 +1906,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   battlesTitle: {
-    color: '#28231F',
+    color: '#F3F0EB',
     fontSize: 25,
     fontWeight: '700',
   },
@@ -1869,10 +1914,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 18,
-    backgroundColor: '#FFF2EB',
+    backgroundColor: '#222222',
   },
   battleStreakText: {
-    color: '#D68140',
+    color: '#F5A047',
     fontSize: 12,
     fontWeight: '600',
   },
@@ -1881,7 +1926,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     padding: 4,
     borderRadius: 25,
-    backgroundColor: '#FFF2EB',
+    backgroundColor: '#222222',
   },
   battleFilter: {
     flex: 1,
@@ -1890,15 +1935,15 @@ const styles = StyleSheet.create({
     borderRadius: 22,
   },
   selectedBattleFilter: {
-    backgroundColor: '#E7842D',
+    backgroundColor: '#D96B0B',
   },
   battleFilterText: {
-    color: '#A77F61',
+    color: '#AAA39A',
     fontSize: 14,
     fontWeight: '500',
   },
   selectedBattleFilterText: {
-    color: '#FFFFFF',
+    color: '#171717',
     fontWeight: '600',
   },
   featuredBattle: {
@@ -1909,8 +1954,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 16,
     borderRadius: 24,
-    backgroundColor: '#E7842D',
-    shadowColor: '#B86B2E',
+    backgroundColor: '#D96B0B',
+    shadowColor: '#B85F12',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.18,
     shadowRadius: 7,
@@ -1924,13 +1969,13 @@ const styles = StyleSheet.create({
     marginLeft: 14,
   },
   featuredBattleTitle: {
-    color: '#FFFFFF',
+    color: '#171717',
     fontSize: 16,
     fontWeight: '700',
   },
   featuredBattleSubtitle: {
     marginTop: 3,
-    color: '#FFF7F0',
+    color: '#171717',
     fontSize: 13,
     lineHeight: 19,
   },
@@ -1947,29 +1992,29 @@ const styles = StyleSheet.create({
     gap: 5,
     paddingHorizontal: 15,
     borderRadius: 19,
-    backgroundColor: '#FFF2EB',
+    backgroundColor: '#222222',
   },
   selectedBattleCategoryFilter: {
-    backgroundColor: '#F98C3E',
+    backgroundColor: '#F28C28',
   },
   battleCategoryFilterEmoji: {
     fontSize: 12,
   },
   battleCategoryFilterText: {
-    color: '#A77F61',
+    color: '#AAA39A',
     fontSize: 13,
     fontWeight: '500',
   },
   selectedBattleCategoryFilterText: {
-    color: '#FFFFFF',
+    color: '#171717',
     fontWeight: '600',
   },
   battleCard: {
     marginTop: 14,
     padding: 16,
     borderRadius: 22,
-    backgroundColor: '#FFFFFF',
-    shadowColor: '#8D7967',
+    backgroundColor: '#171717',
+    shadowColor: '#706050',
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.12,
     shadowRadius: 6,
@@ -1983,19 +2028,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 9,
     paddingVertical: 5,
     borderRadius: 14,
-    backgroundColor: '#FFF2EB',
+    backgroundColor: '#222222',
   },
   battleCategoryIcon: {
     fontSize: 12,
   },
   battleCategoryText: {
-    color: '#B07D50',
+    color: '#AAA39A',
     fontSize: 12,
     fontWeight: '500',
   },
   battleTitle: {
     marginTop: 9,
-    color: '#44372F',
+    color: '#F3F0EB',
     fontSize: 16,
     fontWeight: '600',
   },
@@ -2007,11 +2052,11 @@ const styles = StyleSheet.create({
     marginTop: 7,
   },
   battleMetaText: {
-    color: '#A99B90',
+    color: '#AAA39A',
     fontSize: 12,
   },
   battleJoined: {
-    color: '#D68140',
+    color: '#F5A047',
     fontSize: 12,
     fontWeight: '600',
   },
@@ -2025,16 +2070,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 20,
-    backgroundColor: '#C9552B',
+    backgroundColor: '#F28C28',
   },
   battleAvatarText: {
-    color: '#FFFFFF',
+    color: '#171717',
     fontSize: 12,
     fontWeight: '700',
   },
   battleScore: {
     marginTop: 4,
-    color: '#8F8176',
+    color: '#AAA39A',
     fontSize: 13,
   },
   battleRank: {
@@ -2045,10 +2090,10 @@ const styles = StyleSheet.create({
     marginTop: 7,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
-    backgroundColor: '#E7842D',
+    backgroundColor: '#D96B0B',
   },
   battleRankText: {
-    color: '#FFFFFF',
+    color: '#171717',
     fontSize: 18,
     fontWeight: '700',
   },
@@ -2057,8 +2102,8 @@ const styles = StyleSheet.create({
     marginHorizontal: 2,
     overflow: 'hidden',
     borderRadius: 24,
-    backgroundColor: '#FFFFFF',
-    shadowColor: '#8D7967',
+    backgroundColor: '#171717',
+    shadowColor: '#706050',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.14,
     shadowRadius: 8,
@@ -2077,10 +2122,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 20,
-    backgroundColor: '#D95B28',
+    backgroundColor: '#F28C28',
   },
   endedAvatarText: {
-    color: '#FFFFFF',
+    color: '#171717',
     fontSize: 14,
     fontWeight: '700',
   },
@@ -2088,13 +2133,13 @@ const styles = StyleSheet.create({
     marginLeft: 10,
   },
   endedAuthorName: {
-    color: '#5D4635',
+    color: '#F3F0EB',
     fontSize: 14,
     fontWeight: '600',
   },
   endedTime: {
     marginTop: 2,
-    color: '#A89483',
+    color: '#AAA39A',
     fontSize: 12,
   },
   endedChallenge: {
@@ -2104,8 +2149,8 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     overflow: 'hidden',
     borderRadius: 14,
-    backgroundColor: '#FFF2E5',
-    color: '#B07D50',
+    backgroundColor: '#242424',
+    color: '#AAA39A',
     fontSize: 11,
   },
   endedArtwork: {
@@ -2124,10 +2169,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 8,
     borderRadius: 16,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#171717',
   },
   endedRankText: {
-    color: '#76563F',
+    color: '#F3F0EB',
     fontSize: 13,
     fontWeight: '700',
   },
@@ -2140,7 +2185,7 @@ const styles = StyleSheet.create({
     paddingBottom: 14,
   },
   endedTitle: {
-    color: '#5D4635',
+    color: '#F3F0EB',
     fontSize: 16,
     fontWeight: '600',
   },
@@ -2156,20 +2201,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 16,
     borderWidth: 1,
-    borderColor: '#E89550',
+    borderColor: '#F28C28',
     borderRadius: 21,
-    backgroundColor: '#FFF9F4',
+    backgroundColor: '#202020',
   },
   endedVotedButton: {
-    backgroundColor: '#F98C3E',
+    backgroundColor: '#F28C28',
   },
   endedVoteText: {
-    color: '#D68140',
+    color: '#F5A047',
     fontSize: 14,
     fontWeight: '600',
   },
   endedVotedText: {
-    color: '#FFFFFF',
+    color: '#171717',
   },
   endedCommentCount: {
     flexDirection: 'row',
@@ -2177,7 +2222,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   endedCommentText: {
-    color: '#A89483',
+    color: '#AAA39A',
     fontSize: 14,
   },
   chatListContent: {
@@ -2191,9 +2236,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 12,
     borderWidth: 1,
-    borderColor: '#F0D8C6',
+    borderColor: '#49321F',
     borderRadius: 22,
-    backgroundColor: '#FFF8F3',
+    backgroundColor: '#202020',
   },
   chatSearchIcon: {
     width: 22,
@@ -2203,7 +2248,7 @@ const styles = StyleSheet.create({
     flex: 1,
     height: '100%',
     marginLeft: 8,
-    color: '#6E5544',
+    color: '#D2CCC4',
     fontSize: 14,
   },
   chatFilters: {
@@ -2216,7 +2261,7 @@ const styles = StyleSheet.create({
   },
   chatStatus: {
     marginTop: 18,
-    color: '#9B8C7F',
+    color: '#AAA39A',
     fontSize: 13,
     lineHeight: 19,
     textAlign: 'center',
@@ -2238,10 +2283,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 9,
     borderRadius: 18,
-    backgroundColor: '#FFF0E4',
+    backgroundColor: '#29231D',
   },
   retryButtonText: {
-    color: '#9B592E',
+    color: '#F5A047',
     fontSize: 13,
     fontWeight: '600',
   },
@@ -2250,7 +2295,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     borderBottomWidth: 1,
-    borderBottomColor: '#F2E9E2',
+    borderBottomColor: '#F2E3D0',
   },
   chatAvatar: {
     width: 50,
@@ -2260,7 +2305,7 @@ const styles = StyleSheet.create({
     borderRadius: 25,
   },
   chatAvatarText: {
-    color: '#FFFFFF',
+    color: '#171717',
     fontSize: 20,
     fontWeight: '600',
   },
@@ -2274,12 +2319,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   conversationName: {
-    color: '#44372F',
+    color: '#F3F0EB',
     fontSize: 15,
     fontWeight: '600',
   },
   conversationTime: {
-    color: '#A99B90',
+    color: '#AAA39A',
     fontSize: 11,
   },
   conversationBottomline: {
@@ -2291,11 +2336,11 @@ const styles = StyleSheet.create({
   conversationPreview: {
     flex: 1,
     marginRight: 8,
-    color: '#9B8C7F',
+    color: '#AAA39A',
     fontSize: 13,
   },
   unreadPreview: {
-    color: '#6E5544',
+    color: '#D2CCC4',
     fontWeight: '500',
   },
   unreadBadge: {
@@ -2305,10 +2350,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 5,
     borderRadius: 10,
-    backgroundColor: '#E89550',
+    backgroundColor: '#F28C28',
   },
   unreadBadgeText: {
-    color: '#FFFFFF',
+    color: '#171717',
     fontSize: 11,
     fontWeight: '600',
   },
@@ -2325,7 +2370,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#F2E9E2',
+    borderBottomColor: '#F2E3D0',
   },
   chatBackButton: {
     width: 34,
@@ -2334,7 +2379,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   chatBackArrow: {
-    color: '#D68140',
+    color: '#F5A047',
     fontSize: 36,
     lineHeight: 40,
   },
@@ -2342,13 +2387,13 @@ const styles = StyleSheet.create({
     marginLeft: 10,
   },
   chatHeaderName: {
-    color: '#44372F',
+    color: '#F3F0EB',
     fontSize: 16,
     fontWeight: '600',
   },
   chatOnline: {
     marginTop: 2,
-    color: '#9A9A8B',
+    color: '#AAA39A',
     fontSize: 12,
   },
   messageScroll: {
@@ -2362,7 +2407,7 @@ const styles = StyleSheet.create({
   chatDate: {
     alignSelf: 'center',
     marginBottom: 18,
-    color: '#B3A599',
+    color: '#AAA39A',
     fontSize: 10,
     fontWeight: '600',
     letterSpacing: 1,
@@ -2386,28 +2431,28 @@ const styles = StyleSheet.create({
   },
   incomingMessageBubble: {
     borderBottomLeftRadius: 5,
-    backgroundColor: '#FFF2EB',
+    backgroundColor: '#222222',
   },
   outgoingMessageBubble: {
     borderBottomRightRadius: 5,
-    backgroundColor: '#E89550',
+    backgroundColor: '#F28C28',
   },
   messageText: {
-    color: '#604A3A',
+    color: '#F3F0EB',
     fontSize: 14,
     lineHeight: 20,
   },
   outgoingMessageText: {
-    color: '#FFFFFF',
+    color: '#171717',
   },
   messageTime: {
     alignSelf: 'flex-end',
     marginTop: 3,
-    color: '#A9988A',
+    color: '#AAA39A',
     fontSize: 10,
   },
   outgoingMessageTime: {
-    color: '#FFF0E4',
+    color: '#171717',
   },
   composer: {
     minHeight: 56,
@@ -2417,15 +2462,15 @@ const styles = StyleSheet.create({
     marginVertical: 10,
     padding: 5,
     borderWidth: 1,
-    borderColor: '#F0D8C6',
+    borderColor: '#49321F',
     borderRadius: 28,
-    backgroundColor: '#FFF8F3',
+    backgroundColor: '#202020',
   },
   composerInput: {
     flex: 1,
     height: 42,
     paddingHorizontal: 12,
-    color: '#604A3A',
+    color: '#F3F0EB',
     fontSize: 14,
   },
   sendButton: {
@@ -2434,14 +2479,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 21,
-    backgroundColor: '#E89550',
+    backgroundColor: '#F28C28',
   },
   disabledSendButton: {
-    backgroundColor: '#D7C8BC',
+    backgroundColor: '#3A3530',
+  },
+  disabledSendButtonText: {
+    color: '#AAA39A',
   },
   sendButtonText: {
     marginTop: -2,
-    color: '#FFFFFF',
+    color: '#171717',
     fontSize: 26,
     fontWeight: '600',
   },
@@ -2464,8 +2512,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 4,
-    borderColor: '#FFFFFF',
+    borderColor: '#393939',
     borderRadius: 31,
-    backgroundColor: '#F98C3E',
+    backgroundColor: '#F28C28',
   },
 });

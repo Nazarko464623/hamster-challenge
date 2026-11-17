@@ -14,6 +14,7 @@ import {
 import { renameMineData } from '@/lib/battles';
 import { getPlayerPreferences, savePlayerPreferences } from '@/lib/player-settings';
 import { supabase } from '@/lib/supabase';
+import { themeColor, useAppTheme, useThemedStyles, type ThemeMode } from '@/components/app-theme-provider';
 
 type PlayerSettingsProps = {
   displayName: string;
@@ -22,15 +23,19 @@ type PlayerSettingsProps = {
 };
 
 export function PlayerSettings({ displayName, onClose, onNameSaved }: PlayerSettingsProps) {
+  const styles = useThemedStyles(baseStyles);
+  const { mode, ready: themeReady, setMode, loadError } = useAppTheme();
   const [name, setName] = useState(displayName);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [preferencesReady, setPreferencesReady] = useState(false);
   const [savingName, setSavingName] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const [savingTheme, setSavingTheme] = useState(false);
   const [nameMessage, setNameMessage] = useState('');
   const [settingsMessage, setSettingsMessage] = useState('');
   const [logoutMessage, setLogoutMessage] = useState('');
+  const [appearanceMessage, setAppearanceMessage] = useState('');
   const preferencesRef = useRef({
     notificationsEnabled: true,
     soundEnabled: true,
@@ -164,6 +169,19 @@ export function PlayerSettings({ displayName, onClose, onNameSaved }: PlayerSett
     }
   };
 
+  const updateTheme = async (enabled: boolean) => {
+    setSavingTheme(true);
+    setAppearanceMessage('');
+    try {
+      await setMode(enabled ? 'dark' : 'light');
+    } catch (error) {
+      console.error('Failed to save appearance preference:', error);
+      setAppearanceMessage('Could not save your appearance preference. Please try again.');
+    } finally {
+      setSavingTheme(false);
+    }
+  };
+
   return (
     <ScrollView
       style={styles.scroll}
@@ -180,13 +198,30 @@ export function PlayerSettings({ displayName, onClose, onNameSaved }: PlayerSett
           <SymbolView
             name={{ ios: 'chevron.left', android: 'arrow_back', web: 'arrow_back' }}
             size={20}
-            tintColor="#9B592E"
+            tintColor={themeColor('#C96A13', mode, 'tintColor')}
             style={styles.backIcon}
           />
         </Pressable>
         <View>
           <Text style={styles.title}>Settings</Text>
           <Text style={styles.subtitle}>Make your space feel like yours</Text>
+        </View>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Appearance</Text>
+        <View style={styles.preferencesCard}>
+          <PreferenceRow
+            title="Dark theme"
+            description="Black and orange; switch off for blue and white"
+            enabled={mode === 'dark'}
+            disabled={savingTheme || !themeReady}
+            mode={mode}
+            onValueChange={updateTheme}
+          />
+          {appearanceMessage || loadError ? (
+            <Text style={styles.message}>{appearanceMessage || loadError}</Text>
+          ) : null}
         </View>
       </View>
 
@@ -203,7 +238,7 @@ export function PlayerSettings({ displayName, onClose, onNameSaved }: PlayerSett
               setNameMessage('');
             }}
             placeholder="Your player name"
-            placeholderTextColor="#B29B88"
+            placeholderTextColor="#999999"
             returnKeyType="done"
             style={styles.nameInput}
             value={name}
@@ -231,6 +266,7 @@ export function PlayerSettings({ displayName, onClose, onNameSaved }: PlayerSett
             description="Keep challenge updates enabled"
             enabled={notificationsEnabled}
             disabled={!preferencesReady}
+            mode={mode}
             onValueChange={(value) => updatePreference('notificationsEnabled', value)}
           />
           <View style={styles.divider} />
@@ -239,6 +275,7 @@ export function PlayerSettings({ displayName, onClose, onNameSaved }: PlayerSett
             description="Play sounds during battles"
             enabled={soundEnabled}
             disabled={!preferencesReady}
+            mode={mode}
             onValueChange={(value) => updatePreference('soundEnabled', value)}
           />
           {settingsMessage ? <Text style={styles.message}>{settingsMessage}</Text> : null}
@@ -269,14 +306,17 @@ function PreferenceRow({
   description,
   enabled,
   disabled,
+  mode,
   onValueChange,
 }: {
   title: string;
   description: string;
   enabled: boolean;
   disabled: boolean;
+  mode: ThemeMode;
   onValueChange: (value: boolean) => void;
 }) {
+  const styles = useThemedStyles(baseStyles);
   return (
     <View style={styles.preferenceRow}>
       <View style={styles.preferenceText}>
@@ -287,8 +327,11 @@ function PreferenceRow({
         accessibilityLabel={title}
         disabled={disabled}
         onValueChange={onValueChange}
-        trackColor={{ false: '#E5D8CD', true: '#F6B27E' }}
-        thumbColor={enabled ? '#E9803F' : '#FFFDFB'}
+        trackColor={{
+          false: themeColor('#444444', mode, 'backgroundColor'),
+          true: themeColor('#F5B565', mode, 'backgroundColor'),
+        }}
+        thumbColor={themeColor(enabled ? '#F28C28' : '#AAA39A', mode)}
         style={styles.preferenceSwitch}
         value={enabled}
       />
@@ -296,7 +339,7 @@ function PreferenceRow({
   );
 }
 
-const styles = StyleSheet.create({
+const baseStyles = StyleSheet.create({
   scroll: {
     flex: 1,
   },
@@ -317,7 +360,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 22,
-    backgroundColor: '#FFF0E4',
+    backgroundColor: '#29231D',
   },
   backIcon: {
     width: 22,
@@ -327,13 +370,13 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   title: {
-    color: '#44372F',
+    color: '#F3F0EB',
     fontSize: 26,
     fontWeight: '700',
   },
   subtitle: {
     marginTop: 3,
-    color: '#9B8774',
+    color: '#AAA39A',
     fontSize: 13,
   },
   section: {
@@ -341,20 +384,20 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     marginBottom: 10,
-    color: '#44372F',
+    color: '#F3F0EB',
     fontSize: 17,
     fontWeight: '700',
   },
   nameCard: {
     padding: 16,
     borderWidth: 1,
-    borderColor: '#F3D6BE',
+    borderColor: '#49321F',
     borderRadius: 22,
-    backgroundColor: '#FFFAF6',
+    backgroundColor: '#202020',
   },
   fieldLabel: {
     marginBottom: 8,
-    color: '#8D735F',
+    color: '#AAA39A',
     fontSize: 13,
     fontWeight: '600',
   },
@@ -362,10 +405,10 @@ const styles = StyleSheet.create({
     height: 48,
     paddingHorizontal: 14,
     borderWidth: 1,
-    borderColor: '#EAD6C5',
+    borderColor: '#49321F',
     borderRadius: 14,
-    backgroundColor: '#FFFFFF',
-    color: '#44372F',
+    backgroundColor: '#171717',
+    color: '#F3F0EB',
     fontSize: 16,
   },
   saveButton: {
@@ -374,25 +417,25 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginTop: 12,
     borderRadius: 14,
-    backgroundColor: '#E9803F',
+    backgroundColor: '#F28C28',
   },
   saveButtonText: {
-    color: '#FFFFFF',
+    color: '#171717',
     fontSize: 15,
     fontWeight: '700',
   },
   message: {
     marginTop: 9,
-    color: '#8A4B2B',
+    color: '#F5A047',
     fontSize: 12,
     lineHeight: 17,
   },
   preferencesCard: {
     paddingHorizontal: 16,
     borderWidth: 1,
-    borderColor: '#F3D6BE',
+    borderColor: '#49321F',
     borderRadius: 22,
-    backgroundColor: '#FFFAF6',
+    backgroundColor: '#202020',
   },
   preferenceRow: {
     minHeight: 84,
@@ -408,18 +451,18 @@ const styles = StyleSheet.create({
     marginTop: -32,
   },
   preferenceTitle: {
-    color: '#5D4635',
+    color: '#F3F0EB',
     fontSize: 14,
     fontWeight: '600',
   },
   preferenceDescription: {
     marginTop: 4,
-    color: '#9B8774',
+    color: '#AAA39A',
     fontSize: 12,
   },
   divider: {
     height: 1,
-    backgroundColor: '#F0E2D6',
+    backgroundColor: '#38302A',
   },
   logoutButton: {
     minHeight: 52,
@@ -428,9 +471,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 9,
     borderWidth: 1,
-    borderColor: '#F0C7BD',
+    borderColor: '#63322D',
     borderRadius: 18,
-    backgroundColor: '#FFF5F2',
+    backgroundColor: '#2C1E1D',
   },
   logoutPressed: {
     opacity: 0.72,

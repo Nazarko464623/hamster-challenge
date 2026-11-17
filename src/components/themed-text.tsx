@@ -1,6 +1,7 @@
 import { Platform, StyleSheet, Text, type TextProps } from 'react-native';
 
 import { Fonts, ThemeColor } from '@/constants/theme';
+import { useThemedStyles } from '@/components/app-theme-provider';
 import { useTheme } from '@/hooks/use-theme';
 
 export type ThemedTextProps = TextProps & {
@@ -10,19 +11,20 @@ export type ThemedTextProps = TextProps & {
 
 export function ThemedText({ style, type = 'default', themeColor, ...rest }: ThemedTextProps) {
   const theme = useTheme();
+  const themedStyles = useThemedStyles(styles);
 
   return (
     <Text
       style={[
         { color: theme[themeColor ?? 'text'] },
-        type === 'default' && styles.default,
-        type === 'title' && styles.title,
-        type === 'small' && styles.small,
-        type === 'smallBold' && styles.smallBold,
-        type === 'subtitle' && styles.subtitle,
-        type === 'link' && styles.link,
-        type === 'linkPrimary' && styles.linkPrimary,
-        type === 'code' && styles.code,
+        type === 'default' && themedStyles.default,
+        type === 'title' && themedStyles.title,
+        type === 'small' && themedStyles.small,
+        type === 'smallBold' && themedStyles.smallBold,
+        type === 'subtitle' && themedStyles.subtitle,
+        type === 'link' && themedStyles.link,
+        type === 'linkPrimary' && themedStyles.linkPrimary,
+        type === 'code' && themedStyles.code,
         style,
       ]}
       {...rest}
@@ -63,7 +65,7 @@ const styles = StyleSheet.create({
   linkPrimary: {
     lineHeight: 30,
     fontSize: 14,
-    color: '#3c87f7',
+    color: '#F28C28',
   },
   code: {
     fontFamily: Fonts.mono,

@@ -6,9 +6,11 @@ import { useEffect } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { welcomeBlurTarget } from '@/components/auth-blur-target';
+import { useThemedStyles } from '@/components/app-theme-provider';
 import { supabase } from '@/lib/supabase';
 
 export default function WelcomeScreen() {
+  const styles = useThemedStyles(baseStyles);
   useEffect(() => {
     let isMounted = true;
 
@@ -97,14 +99,14 @@ export default function WelcomeScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const baseStyles = StyleSheet.create({
   container: {
     flex: 1,
     width: '100%',
     maxWidth: 402,
     alignSelf: 'center',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#171717',
   },
   hamsterLogo: {
     position: 'absolute',
@@ -124,32 +126,32 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: 24,
     borderWidth: 2,
-    borderColor: '#F98C3E',
-    shadowColor: '#785943',
+    borderColor: '#F28C28',
+    shadowColor: '#4A4A4A',
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.18,
     shadowRadius: 3,
     elevation: 3,
   },
   signUpButton: {
-    backgroundColor: '#FFD3A9',
+    backgroundColor: '#332416',
   },
   logInButton: {
-    backgroundColor: '#FFF2EB',
+    backgroundColor: '#222222',
   },
   signUpText: {
-    color: '#A23A1B',
+    color: '#F3F0EB',
     fontSize: 20,
   },
   logInText: {
-    color: '#F98C3E',
+    color: '#F28C28',
     fontSize: 20,
   },
   pressedButton: {
-    backgroundColor: '#F98C3E',
+    backgroundColor: '#F28C28',
   },
   pressedButtonText: {
-    color: '#A23A1B',
+    color: '#171717',
   },
   legalText: {
     position: 'absolute',
@@ -161,7 +163,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   legalLink: {
-    color: '#2188F7',
+    color: '#F28C28',
   },
   productionLogo: {
     position: 'absolute',

@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 
 import { welcomeBlurTarget } from './auth-blur-target';
+import { themeColor, useAppTheme, useThemedStyles } from '@/components/app-theme-provider';
 import { supabase } from '@/lib/supabase';
 
 type AuthScreenProps = {
@@ -45,6 +46,8 @@ function AuthInput({
   onChangeText,
   value,
 }: AuthInputProps) {
+  const styles = useThemedStyles(baseStyles);
+  const { mode } = useAppTheme();
   return (
     <View>
       <TextInput
@@ -53,7 +56,7 @@ function AuthInput({
         keyboardType={keyboardType}
         onChangeText={onChangeText}
         placeholder={placeholder}
-        placeholderTextColor="#C5A988"
+        placeholderTextColor={themeColor('#999999', mode)}
         returnKeyType="next"
         secureTextEntry={secureTextEntry}
         style={[styles.input, styles.inputText, error && styles.inputError]}
@@ -116,6 +119,7 @@ function getAuthErrorMessage(error: { code?: string; message: string }, isSignup
 }
 
 export function AuthScreen({ mode }: AuthScreenProps) {
+  const styles = useThemedStyles(baseStyles);
   const isSignup = mode === 'signup';
   const [hasSubmitted, setHasSubmitted] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -357,7 +361,7 @@ export function AuthScreen({ mode }: AuthScreenProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const baseStyles = StyleSheet.create({
   backdrop: {
     flex: 1,
     justifyContent: 'center',
@@ -377,7 +381,7 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     overflow: 'hidden',
     borderRadius: 32,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#171717',
   },
   backButton: {
     position: 'absolute',
@@ -389,7 +393,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 20,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#171717',
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.14,
@@ -398,7 +402,7 @@ const styles = StyleSheet.create({
   },
   backArrow: {
     marginTop: -4,
-    color: '#F47724',
+    color: '#FFAA45',
     fontSize: 36,
     fontWeight: '300',
     lineHeight: 40,
@@ -424,9 +428,9 @@ const styles = StyleSheet.create({
     height: 45,
     paddingHorizontal: 16,
     borderRadius: 24,
-    backgroundColor: '#FFF2EB',
+    backgroundColor: '#222222',
     fontSize: 18,
-    shadowColor: '#8D7967',
+    shadowColor: '#706050',
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.12,
     shadowRadius: 3,
@@ -437,7 +441,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 2,
   },
   inputText: {
-    color: '#E9803F',
+    color: '#F28C28',
   },
   errorText: {
     marginTop: 4,
@@ -457,7 +461,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderWidth: 1,
     borderRadius: 16,
-    backgroundColor: '#FFF2EB',
+    backgroundColor: '#222222',
     fontSize: 13,
     lineHeight: 18,
   },
@@ -469,12 +473,12 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   authError: {
-    borderColor: '#E8B4A7',
-    color: '#A23A1B',
+    borderColor: '#63322D',
+    color: '#F3F0EB',
   },
   authInfo: {
-    borderColor: '#FFD3A9',
-    color: '#A23A1B',
+    borderColor: '#49321F',
+    color: '#F3F0EB',
   },
   nextButton: {
     position: 'absolute',
@@ -487,7 +491,7 @@ const styles = StyleSheet.create({
     width: 90,
     height: 40,
     borderRadius: 22,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#171717',
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.14,
@@ -495,12 +499,12 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   nextText: {
-    color: '#E9803F',
+    color: '#F28C28',
     fontSize: 16,
   },
   nextArrow: {
     marginTop: -3,
-    color: '#F47724',
+    color: '#FFAA45',
     fontSize: 32,
     fontWeight: '300',
     lineHeight: 34,
