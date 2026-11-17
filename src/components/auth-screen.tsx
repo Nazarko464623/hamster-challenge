@@ -1,7 +1,7 @@
 import { BlurView } from 'expo-blur';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Keyboard,
   KeyboardAvoidingView,
@@ -52,17 +52,43 @@ function AuthInput({
 }: AuthInputProps) {
   const styles = useThemedStyles(baseStyles);
   const { mode } = useAppTheme();
-  // Suggestions depend only on the text, not on focus: on web the input loses focus
-  // before the tap reaches a suggestion, which used to hide the list mid-tap.
-  const suggestions = suggestEmails ? getEmailSuggestions(value, 3) : [];
+  const [isFocused, setIsFocused] = useState(false);
+  const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (blurTimer.current) {
+      clearTimeout(blurTimer.current);
+    }
+  }, []);
+  const suggestions = suggestEmails && isFocused ? getEmailSuggestions(value) : [];
+  const dropdownHeight = suggestions.length * SUGGESTION_ROW_HEIGHT + 8;
   return (
-    <View>
+    <View
+      style={
+        suggestions.length > 0 && [
+          styles.inputWithSuggestions,
+          // The wrapper is stretched over the dropdown (and pulled back with a negative
+          // margin so nothing below moves). On Android a tap only reaches a view that
+          // lies inside its parent's bounds; before, the list hung outside them.
+          { paddingBottom: dropdownHeight + 4, marginBottom: -(dropdownHeight + 4) },
+        ]
+      }>
       <TextInput
         accessibilityLabel={placeholder}
         autoCapitalize="none"
         autoCorrect={suggestEmails ? false : undefined}
         keyboardType={keyboardType}
+        onBlur={() => {
+          // On web the input loses focus before the click on a suggestion lands,
+          // so the list is hidden a moment later instead of immediately.
+          blurTimer.current = setTimeout(() => setIsFocused(false), 300);
+        }}
         onChangeText={onChangeText}
+        onFocus={() => {
+          if (blurTimer.current) {
+            clearTimeout(blurTimer.current);
+          }
+          setIsFocused(true);
+        }}
         placeholder={placeholder}
         placeholderTextColor={themeColor('#999999', mode)}
         returnKeyType="next"
@@ -71,21 +97,19 @@ function AuthInput({
         value={value}
       />
       {suggestions.length > 0 ? (
-        // Kept inside the normal layout (not absolutely positioned): on Android a tap
-        // outside the parent's bounds does not reach the button and falls through.
-        <View accessibilityRole="menu" style={styles.suggestionRow}>
+        <View accessibilityRole="menu" style={[styles.suggestionList, { height: dropdownHeight }]}>
           {suggestions.map((suggestion) => {
-            const domain = suggestion.slice(suggestion.indexOf('@') + 1);
+            const atIndex = suggestion.indexOf('@');
             return (
               <Pressable
                 key={suggestion}
-                accessibilityRole="button"
+                accessibilityRole="menuitem"
                 accessibilityLabel={`Use ${suggestion}`}
-                hitSlop={6}
                 onPress={() => onChangeText(suggestion)}
-                style={({ pressed }) => [styles.suggestionChip, pressed && styles.suggestionPressed]}>
+                style={({ pressed }) => [styles.suggestionItem, pressed && styles.suggestionPressed]}>
                 <Text numberOfLines={1} style={styles.suggestionText}>
-                  @<Text style={styles.suggestionDomain}>{domain}</Text>
+                  {suggestion.slice(0, atIndex + 1)}
+                  <Text style={styles.suggestionDomain}>{suggestion.slice(atIndex + 1)}</Text>
                 </Text>
               </Pressable>
             );
@@ -103,6 +127,7 @@ function AuthInput({
   );
 }
 
+const SUGGESTION_ROW_HEIGHT = 36;
 const latinOnlyEmailError = 'use latin letters only (a-z), switch your keyboard to english.';
 
 function getAuthErrorMessage(error: { code?: string; message: string }, isSignup: boolean) {
@@ -511,6 +536,7 @@ const baseStyles = StyleSheet.create({
     top: '17.5%',
     left: '10%',
     width: '80%',
+    minHeight: 210,
     gap: 25,
   },
   input: {
@@ -525,27 +551,38 @@ const baseStyles = StyleSheet.create({
     shadowRadius: 3,
     elevation: 2,
   },
-  suggestionRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginTop: 8,
-    marginLeft: 6,
+  inputWithSuggestions: {
+    zIndex: 10,
+    elevation: 10,
   },
-  suggestionChip: {
-    paddingHorizontal: 11,
-    paddingVertical: 6,
+  suggestionList: {
+    position: 'absolute',
+    top: 49,
+    right: 0,
+    left: 0,
+    overflow: 'hidden',
+    paddingVertical: 4,
     borderWidth: 1,
     borderColor: '#444444',
-    borderRadius: 14,
+    borderRadius: 18,
     backgroundColor: '#222222',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 10,
+  },
+  suggestionItem: {
+    height: SUGGESTION_ROW_HEIGHT,
+    justifyContent: 'center',
+    paddingHorizontal: 16,
   },
   suggestionPressed: {
     backgroundColor: '#393939',
   },
   suggestionText: {
-    color: '#C4C4C4',
-    fontSize: 13,
+    color: '#D2CCC4',
+    fontSize: 15,
   },
   suggestionDomain: {
     color: '#F28C28',
