@@ -18,13 +18,14 @@ import {
 import { welcomeBlurTarget } from './auth-blur-target';
 import { themeColor, useAppTheme, useThemedStyles } from '@/components/app-theme-provider';
 import { getEmailSuggestions } from '@/lib/email-domains';
+import { LEGAL_VERSION } from '@/lib/legal';
 import { supabase } from '@/lib/supabase';
 
 type AuthScreenProps = {
   mode: 'login' | 'signup';
 };
 
-type AuthField = 'nickname' | 'email' | 'password' | 'repeatedPassword';
+type AuthField = 'nickname' | 'email' | 'password' | 'repeatedPassword' | 'terms';
 type AuthErrors = Partial<Record<AuthField, string>>;
 type AuthMessage = { text: string; tone: 'error' | 'info' };
 
@@ -51,19 +52,17 @@ function AuthInput({
 }: AuthInputProps) {
   const styles = useThemedStyles(baseStyles);
   const { mode } = useAppTheme();
-  const [isFocused, setIsFocused] = useState(false);
-  const suggestions = suggestEmails && isFocused ? getEmailSuggestions(value) : [];
-  const showSuggestions = suggestions.length > 0;
+  // Suggestions depend only on the text, not on focus: on web the input loses focus
+  // before the tap reaches a suggestion, which used to hide the list mid-tap.
+  const suggestions = suggestEmails ? getEmailSuggestions(value, 3) : [];
   return (
-    <View style={showSuggestions && styles.inputWithSuggestions}>
+    <View>
       <TextInput
         accessibilityLabel={placeholder}
         autoCapitalize="none"
         autoCorrect={suggestEmails ? false : undefined}
         keyboardType={keyboardType}
-        onBlur={() => setIsFocused(false)}
         onChangeText={onChangeText}
-        onFocus={() => setIsFocused(true)}
         placeholder={placeholder}
         placeholderTextColor={themeColor('#999999', mode)}
         returnKeyType="next"
@@ -71,23 +70,26 @@ function AuthInput({
         style={[styles.input, styles.inputText, error && styles.inputError]}
         value={value}
       />
-      {showSuggestions ? (
-        <View accessibilityRole="menu" style={styles.suggestionList}>
-          {suggestions.map((suggestion) => (
-            <Pressable
-              key={suggestion}
-              accessibilityRole="menuitem"
-              accessibilityLabel={`Use ${suggestion}`}
-              onPressIn={() => onChangeText(suggestion)}
-              style={({ pressed }) => [styles.suggestionItem, pressed && styles.suggestionPressed]}>
-              <Text numberOfLines={1} style={styles.suggestionText}>
-                {suggestion.slice(0, suggestion.indexOf('@') + 1)}
-                <Text style={styles.suggestionDomain}>
-                  {suggestion.slice(suggestion.indexOf('@') + 1)}
+      {suggestions.length > 0 ? (
+        // Kept inside the normal layout (not absolutely positioned): on Android a tap
+        // outside the parent's bounds does not reach the button and falls through.
+        <View accessibilityRole="menu" style={styles.suggestionRow}>
+          {suggestions.map((suggestion) => {
+            const domain = suggestion.slice(suggestion.indexOf('@') + 1);
+            return (
+              <Pressable
+                key={suggestion}
+                accessibilityRole="button"
+                accessibilityLabel={`Use ${suggestion}`}
+                hitSlop={6}
+                onPress={() => onChangeText(suggestion)}
+                style={({ pressed }) => [styles.suggestionChip, pressed && styles.suggestionPressed]}>
+                <Text numberOfLines={1} style={styles.suggestionText}>
+                  @<Text style={styles.suggestionDomain}>{domain}</Text>
                 </Text>
-              </Text>
-            </Pressable>
-          ))}
+              </Pressable>
+            );
+          })}
         </View>
       ) : null}
       {error ? (
@@ -152,6 +154,7 @@ export function AuthScreen({ mode }: AuthScreenProps) {
   const [hasSubmitted, setHasSubmitted] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [authMessage, setAuthMessage] = useState<AuthMessage | null>(null);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [fields, setFields] = useState({
     nickname: '',
     email: '',
@@ -185,10 +188,18 @@ export function AuthScreen({ mode }: AuthScreenProps) {
     } else if (isSignup && fields.repeatedPassword !== fields.password) {
       errors.repeatedPassword = 'passwords do not match.';
     }
+    if (isSignup && !acceptedTerms) {
+      errors.terms = 'accept the terms to continue.';
+    }
     return errors;
   };
   const validationErrors = hasSubmitted ? getValidationErrors() : {};
-  const hasValidationErrors = Object.keys(validationErrors).length > 0;
+  // The terms checkbox shows its own hint, so it should not squeeze the input fields.
+  const hasValidationErrors = Object.keys(validationErrors).some((field) => field !== 'terms');
+  const openLegal = (pathname: '/terms' | '/privacy') => {
+    Keyboard.dismiss();
+    router.push(pathname);
+  };
   const dismiss = () => {
     if (router.canGoBack()) {
       router.back();
@@ -213,7 +224,13 @@ export function AuthScreen({ mode }: AuthScreenProps) {
         const { data, error } = await supabase.auth.signUp({
           email,
           password: fields.password,
-          options: { data: { nickname } },
+          options: {
+            data: {
+              nickname,
+              terms_version: LEGAL_VERSION,
+              terms_accepted_at: new Date().toISOString(),
+            },
+          },
         });
 
         if (error) {
@@ -341,6 +358,40 @@ export function AuthScreen({ mode }: AuthScreenProps) {
                   {authMessage.text}
                 </Text>
               ) : null}
+              <View style={styles.consentRow}>
+                <Pressable
+                  accessibilityRole="checkbox"
+                  accessibilityLabel="I agree to the Terms of Use and Privacy Policy"
+                  accessibilityState={{ checked: acceptedTerms }}
+                  hitSlop={8}
+                  onPress={() => {
+                    setAcceptedTerms((accepted) => !accepted);
+                    setAuthMessage(null);
+                  }}
+                  style={[
+                    styles.checkbox,
+                    acceptedTerms && styles.checkboxChecked,
+                    validationErrors.terms && styles.checkboxError,
+                  ]}>
+                  {acceptedTerms ? <Text style={styles.checkboxMark}>✓</Text> : null}
+                </Pressable>
+                <Text style={[styles.consentText, validationErrors.terms && styles.consentTextError]}>
+                  I agree to the{' '}
+                  <Text
+                    accessibilityRole="link"
+                    onPress={() => openLegal('/terms')}
+                    style={styles.consentLink}>
+                    Terms of Use
+                  </Text>{' '}
+                  and{' '}
+                  <Text
+                    accessibilityRole="link"
+                    onPress={() => openLegal('/privacy')}
+                    style={styles.consentLink}>
+                    Privacy Policy
+                  </Text>
+                </Text>
+              </View>
             </>
           ) : (
             <View style={styles.loginFields}>
@@ -466,42 +517,76 @@ const baseStyles = StyleSheet.create({
     shadowRadius: 3,
     elevation: 2,
   },
-  inputWithSuggestions: {
-    zIndex: 10,
-    elevation: 10,
+  suggestionRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 8,
+    marginLeft: 6,
   },
-  suggestionList: {
-    position: 'absolute',
-    top: 49,
-    right: 0,
-    left: 0,
-    zIndex: 10,
-    overflow: 'hidden',
-    paddingVertical: 4,
+  suggestionChip: {
+    paddingHorizontal: 11,
+    paddingVertical: 6,
     borderWidth: 1,
     borderColor: '#444444',
-    borderRadius: 18,
+    borderRadius: 14,
     backgroundColor: '#222222',
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 10,
-  },
-  suggestionItem: {
-    paddingHorizontal: 16,
-    paddingVertical: 9,
   },
   suggestionPressed: {
     backgroundColor: '#393939',
   },
   suggestionText: {
     color: '#C4C4C4',
-    fontSize: 15,
+    fontSize: 13,
   },
   suggestionDomain: {
     color: '#F28C28',
     fontWeight: '600',
+  },
+  consentRow: {
+    position: 'absolute',
+    left: 22,
+    right: 124,
+    bottom: 22,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: '#777777',
+    borderRadius: 7,
+    backgroundColor: '#222222',
+  },
+  checkboxChecked: {
+    borderColor: '#F28C28',
+    backgroundColor: '#F28C28',
+  },
+  checkboxError: {
+    borderColor: '#D47A62',
+  },
+  checkboxMark: {
+    marginTop: -1,
+    color: '#171717',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  consentText: {
+    flex: 1,
+    color: '#D2CCC4',
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  consentTextError: {
+    color: '#D47A62',
+  },
+  consentLink: {
+    color: '#F28C28',
+    textDecorationLine: 'underline',
   },
   inputError: {
     borderBottomColor: '#D47A62',
