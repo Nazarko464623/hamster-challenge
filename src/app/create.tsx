@@ -1,8 +1,10 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import { useFonts } from 'expo-font';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import Slider from '@react-native-community/slider';
+import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   Easing,
@@ -15,12 +17,10 @@ import Animated, {
 } from 'react-native-reanimated';
 import Svg, { Path } from 'react-native-svg';
 
-import { saveCreatedBattle, type UserBattle } from '@/lib/battles';
+import { createBattleWithEntry, saveCreatedBattle, type UserBattle } from '@/lib/battles';
 import { themeColor, useAppTheme, useThemedStyles } from '@/components/app-theme-provider';
 
 const categories = ['sport', 'photo', 'art', 'music', 'gaming', 'food', 'other'] as const;
-const durations = ['1 day', '3 days', 'week'] as const;
-const votingOptions = ['everyone', 'followers'] as const;
 
 // Shorter durations create faster motion; distance, rotation, and scale control intensity.
 const WAVE_MOTION = {
@@ -42,15 +42,34 @@ export default function CreateScreen() {
     NationalPark: require('../../assets/fonts/NationalPark-SemiBold.ttf'),
   });
   const [title, setTitle] = useState('');
-  const [rules, setRules] = useState('');
+  const [customCategory, setCustomCategory] = useState('');
   const [category, setCategory] = useState<(typeof categories)[number] | null>(null);
-  const [duration, setDuration] = useState<(typeof durations)[number] | null>(null);
-  const [voting, setVoting] = useState<(typeof votingOptions)[number] | null>(null);
-  const isCreateDisabled = !title.trim() || !category || !duration || !voting;
+  const [durationDays, setDurationDays] = useState(1);
+  const [artworkUri, setArtworkUri] = useState<string | null>(null);
+  const isCreateDisabled =
+    !title.trim() || !category || (category === 'other' && !customCategory.trim()) || !artworkUri;
+
+  const chooseArtwork = async (source: 'camera' | 'gallery') => {
+    const permission =
+      source === 'camera'
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      return;
+    }
+
+    const result =
+      source === 'camera'
+        ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.85 })
+        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.85 });
+    if (!result.canceled) {
+      setArtworkUri(result.assets[0].uri);
+    }
+  };
 
   const createBattle = async () => {
     const owner = typeof nickname === 'string' && nickname.trim() ? nickname.trim() : 'Player';
-    if (!title.trim() || !category || !duration || !voting) {
+    if (isCreateDisabled || !category || !artworkUri) {
       return;
     }
 
@@ -63,22 +82,38 @@ export default function CreateScreen() {
       food: '🍔',
       other: '✨',
     };
+    const createdAt = new Date().toISOString();
+    const endsAt = new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000).toISOString();
     const battle: UserBattle = {
       id: `created-${Date.now()}`,
       owner,
       title: title.trim(),
       category: category[0].toUpperCase() + category.slice(1),
       icon: categoryIcons[category],
-      rules: rules.trim(),
-      time: duration,
-      players: 0,
+      rules: customCategory.trim(),
+      time: `${durationDays} ${durationDays === 1 ? 'day' : 'days'}`,
+      artworkUrl: artworkUri,
+      players: 1,
       score: 0,
       rank: 0,
       status: 'live',
-      createdAt: new Date().toISOString(),
+      createdAt,
+      endsAt,
     };
 
-    await saveCreatedBattle(owner, battle);
+    try {
+      const sharedBattle = await createBattleWithEntry({
+        title,
+        category: category[0].toUpperCase() + category.slice(1),
+        customCategory: category === 'other' ? customCategory : undefined,
+        durationDays,
+        artworkUri,
+        owner,
+      });
+      await saveCreatedBattle(owner, sharedBattle ?? battle);
+    } catch {
+      await saveCreatedBattle(owner, battle);
+    }
     router.replace({ pathname: '/feed', params: { nickname: owner } });
   };
 
@@ -132,54 +167,61 @@ export default function CreateScreen() {
                 key={option}
                 label={option}
                 selected={category === option}
-                onPress={() => setCategory(option)}
+                onPress={() => {
+                  setCategory(option);
+                  if (option !== 'other') {
+                    setCustomCategory('');
+                  }
+                }}
               />
             ))}
           </View>
         </View>
 
-        <View style={styles.fieldSection}>
-          <Text style={styles.sectionLabel}>Rules</Text>
+        {category === 'other' && <View style={styles.fieldSection}>
+          <Text style={styles.sectionLabel}>Other category</Text>
           <TextInput
-            accessibilityLabel="Battle rules"
-            multiline
-            onChangeText={setRules}
-            placeholder="what should people submit?"
+            accessibilityLabel="Other category"
+            onChangeText={setCustomCategory}
+            placeholder="enter your category"
             placeholderTextColor={themeColor('#999999', mode)}
-            style={styles.rulesInput}
-            textAlignVertical="top"
-            value={rules}
+            style={styles.titleInput}
+            value={customCategory}
           />
+        </View>}
+
+        <View style={styles.fieldSection}>
+          <Text style={styles.sectionLabel}>Add your artwork</Text>
+          <View style={styles.artworkActions}>
+            <Pressable accessibilityRole="button" accessibilityLabel="Take artwork photo" onPress={() => chooseArtwork('camera')} style={styles.artworkButton}>
+              <Text style={styles.artworkButtonIcon}>⌾</Text>
+              <Text style={styles.artworkButtonText}>Camera</Text>
+            </Pressable>
+            <Pressable accessibilityRole="button" accessibilityLabel="Choose artwork from gallery" onPress={() => chooseArtwork('gallery')} style={styles.artworkButton}>
+              <Text style={styles.artworkButtonIcon}>▧</Text>
+              <Text style={styles.artworkButtonText}>Gallery</Text>
+            </Pressable>
+          </View>
+          {artworkUri && <Image accessibilityLabel="Selected artwork" source={{ uri: artworkUri }} style={styles.artworkPreview} />}
+          {artworkUri && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Remove selected artwork"
+              onPress={() => setArtworkUri(null)}
+              style={({ pressed }) => [styles.removeArtworkButton, pressed && styles.pressed]}>
+              <Text style={styles.removeArtworkText}>Remove artwork</Text>
+            </Pressable>
+          )}
         </View>
 
         <View style={styles.fieldSection}>
           <Text style={styles.sectionLabel}>Runs for</Text>
-          <View style={styles.optionRow}>
-            {durations.map((option) => (
-              <OptionPill
-                key={option}
-                label={option}
-                selected={duration === option}
-                onPress={() => setDuration(option)}
-                style={styles.durationPill}
-              />
-            ))}
+          <View style={styles.sliderLabels}>
+            <Text style={styles.sliderValue}>1 day</Text>
+            <Text style={styles.sliderValue}>{durationDays} {durationDays === 1 ? 'day' : 'days'}</Text>
+            <Text style={styles.sliderValue}>7 days</Text>
           </View>
-        </View>
-
-        <View style={styles.fieldSection}>
-          <Text style={styles.sectionLabel}>Who can vote</Text>
-          <View style={styles.optionRow}>
-            {votingOptions.map((option) => (
-              <OptionPill
-                key={option}
-                label={option}
-                selected={voting === option}
-                onPress={() => setVoting(option)}
-                style={styles.votingPill}
-              />
-            ))}
-          </View>
+          <Slider accessibilityLabel="Battle duration" minimumValue={1} maximumValue={7} step={1} value={durationDays} onValueChange={setDurationDays} minimumTrackTintColor="#F28C28" maximumTrackTintColor="#3A3530" thumbTintColor="#F28C28" />
         </View>
       </ScrollView>
 
@@ -460,6 +502,53 @@ const baseStyles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 2,
+  },
+  artworkActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  artworkButton: {
+    flex: 1,
+    minHeight: 76,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 22,
+    backgroundColor: '#222222',
+  },
+  artworkButtonIcon: {
+    color: '#F28C28',
+    fontSize: 26,
+  },
+  artworkButtonText: {
+    marginTop: 4,
+    color: '#F3F0EB',
+    fontSize: 14,
+  },
+  artworkPreview: {
+    width: '100%',
+    height: 150,
+    marginTop: 12,
+    borderRadius: 22,
+  },
+  removeArtworkButton: {
+    alignSelf: 'center',
+    marginTop: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 16,
+    backgroundColor: '#3A3530',
+  },
+  removeArtworkText: {
+    color: '#F3F0EB',
+    fontSize: 13,
+  },
+  sliderLabels: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  sliderValue: {
+    color: '#AAA39A',
+    fontSize: 13,
   },
   optionGrid: {
     flexDirection: 'row',

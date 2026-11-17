@@ -1,4 +1,6 @@
 import { SymbolView } from 'expo-symbols';
+import { Image } from 'expo-image';
+import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import {
@@ -11,6 +13,7 @@ import {
 } from 'react';
 import {
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -24,7 +27,7 @@ import Svg, { Circle, Path } from 'react-native-svg';
 
 import { PlayerSettings } from '@/components/player-settings';
 import { themeColor, useAppTheme, useThemedStyles } from '@/components/app-theme-provider';
-import { getMineData, setBattlePinned, type UserBattle } from '@/lib/battles';
+import { addBattleEntry, getMineData, getSharedBattles, setBattlePinned, type UserBattle } from '@/lib/battles';
 import {
   getDirectMessages,
   getMessagingSnapshot,
@@ -142,6 +145,8 @@ export default function FeedScreen() {
   const [battleStatus, setBattleStatus] = useState<BattleStatus>('live');
   const [pinnedBattleIds, setPinnedBattleIds] = useState<string[]>([]);
   const [createdBattles, setCreatedBattles] = useState<UserBattle[]>([]);
+  const [sharedBattles, setSharedBattles] = useState<UserBattle[]>([]);
+  const [debugEndedBattleIds, setDebugEndedBattleIds] = useState<string[]>([]);
   const [showSettings, setShowSettings] = useState(false);
   const [savedDisplayName, setSavedDisplayName] = useState<string | null>(null);
   const insets = useSafeAreaInsets();
@@ -159,6 +164,11 @@ export default function FeedScreen() {
         setCreatedBattles(data.createdBattles);
       }
     });
+    getSharedBattles().then((battles) => {
+      if (active) {
+        setSharedBattles(battles);
+      }
+    });
     return () => {
       active = false;
     };
@@ -171,6 +181,23 @@ export default function FeedScreen() {
     }
 
     setActiveTab(tabId);
+  };
+
+  const handleJoinBattle = async (battleId: string, artworkUri: string) => {
+    const artworkUrl = await addBattleEntry(battleId, artworkUri);
+    setPinnedBattleIds((current) => [...new Set([...current, battleId])]);
+    await setBattlePinned(displayName, battleId, true);
+    setCreatedBattles((current) =>
+      current.map((battle) =>
+        battle.id === battleId ? { ...battle, players: battle.players + 1 } : battle
+      )
+    );
+    setSharedBattles((current) =>
+      current.map((battle) =>
+        battle.id === battleId ? { ...battle, players: battle.players + 1 } : battle
+      )
+    );
+    return artworkUrl;
   };
 
   return (
@@ -198,6 +225,10 @@ export default function FeedScreen() {
           onStatusChange={setBattleStatus}
           pinnedBattleIds={pinnedBattleIds}
           createdBattles={createdBattles}
+          sharedBattles={sharedBattles}
+          onJoinBattle={handleJoinBattle}
+          debugEndedBattleIds={debugEndedBattleIds}
+          onEndBattle={(battleId) => setDebugEndedBattleIds((current) => [...new Set([...current, battleId])])}
           onTogglePin={async (battleId, pinned) => {
             setPinnedBattleIds((current) =>
               pinned ? [...new Set([...current, battleId])] : current.filter((id) => id !== battleId)
@@ -240,6 +271,14 @@ export default function FeedScreen() {
       </View>
     </View>
   );
+}
+
+function isBattleLive(battle: UserBattle, now: number) {
+  return battle.status === 'live' && (!battle.endsAt || new Date(battle.endsAt).getTime() > now);
+}
+
+function dedupeBattles(battles: UserBattle[]) {
+  return [...new Map(battles.map((battle) => [battle.id, battle])).values()];
 }
 
 function LeaderboardContent({ displayName }: { displayName: string }) {
@@ -361,27 +400,79 @@ function HomeContent({
   onStatusChange,
   pinnedBattleIds,
   createdBattles,
+  sharedBattles,
   onTogglePin,
+  onJoinBattle,
+  debugEndedBattleIds,
+  onEndBattle,
 }: {
   topInset: number;
   status: BattleStatus;
   onStatusChange: (status: BattleStatus) => void;
   pinnedBattleIds: string[];
   createdBattles: UserBattle[];
+  sharedBattles: UserBattle[];
   onTogglePin: (battleId: string, pinned: boolean) => void;
+  onJoinBattle: (battleId: string, artworkUri: string) => Promise<string>;
+  debugEndedBattleIds: string[];
+  onEndBattle: (battleId: string) => void;
 }) {
   const styles = useThemedStyles(baseStyles);
   const [selectedCategory, setSelectedCategory] = useState<BattleCategory>('All');
+  const [now, setNow] = useState(Date.now());
+  const [participationBattle, setParticipationBattle] = useState<UserBattle | (typeof liveBattles)[number] | null>(null);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+  const createdAndSharedBattles = dedupeBattles([...createdBattles, ...sharedBattles]);
+  const userLiveBattles = createdAndSharedBattles.filter((battle) => isBattleLive(battle, now));
+  const userEndedBattles = createdAndSharedBattles.filter((battle) => !isBattleLive(battle, now));
+  const allKnownBattles = [...liveBattles, ...userLiveBattles];
+  const allLiveBattles = allKnownBattles.filter((battle) => !debugEndedBattleIds.includes(battle.id));
+  const debugEndedBattles = allKnownBattles.filter((battle) => debugEndedBattleIds.includes(battle.id));
   const visibleLiveBattles =
     selectedCategory === 'All'
-      ? liveBattles
-      : liveBattles.filter((battle) => battle.category === selectedCategory);
-  const mineLiveBattles = liveBattles.filter((battle) => pinnedBattleIds.includes(battle.id));
+      ? allLiveBattles
+      : allLiveBattles.filter((battle) => battle.category === selectedCategory);
+  const mineLiveBattles = [...liveBattles, ...userLiveBattles].filter(
+    (battle) => pinnedBattleIds.includes(battle.id) && !debugEndedBattleIds.includes(battle.id)
+  );
   const mineEndedGames = endedGames.filter((game) => pinnedBattleIds.includes(game.id));
   const mineBattlesCount = mineLiveBattles.length + mineEndedGames.length + createdBattles.length;
 
+  const chooseParticipationArtwork = async (source: 'camera' | 'gallery') => {
+    if (!participationBattle) {
+      return;
+    }
+
+    const permission =
+      source === 'camera'
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      return;
+    }
+
+    const result =
+      source === 'camera'
+        ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.85 })
+        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.85 });
+    if (result.canceled) {
+      return;
+    }
+
+    try {
+      await onJoinBattle(participationBattle.id, result.assets[0].uri);
+      setParticipationBattle(null);
+    } catch (error) {
+      console.error('Failed to add battle entry:', error);
+    }
+  };
+
   return (
-    <ScrollView
+    <>
+      <ScrollView
       style={styles.contentScroll}
       contentContainerStyle={[
         styles.battlesContent,
@@ -478,20 +569,32 @@ function HomeContent({
             <Text style={styles.battleCategoryText}>{battle.category}</Text>
           </View>
           <Text style={styles.battleTitle}>{battle.title}</Text>
+           {'artworkUrl' in battle && battle.artworkUrl && (
+             <Image
+               accessibilityLabel={`${battle.title} artwork`}
+               source={{ uri: battle.artworkUrl }}
+               style={styles.battleArtwork}
+             />
+           )}
+           <Pressable
+             accessibilityRole="button"
+             accessibilityLabel={`Join ${battle.title}`}
+             onPress={() => setParticipationBattle(battle)}
+             style={({ pressed }) => [styles.joinButton, pressed && { opacity: 0.75 }]}>
+             <Text style={styles.joinButtonText}>＋</Text>
+           </Pressable>
           <View style={styles.battleMeta}>
             <Text style={styles.battleMetaText}>◷ {battle.time}</Text>
             <Text style={styles.battleMetaText}>{battle.players} players</Text>
             <Text style={styles.battleJoined}>✓ Joined</Text>
           </View>
-          <View style={styles.battleResult}>
-            <View style={styles.battleAvatar}>
-              <Text style={styles.battleAvatarText}>VO</Text>
-            </View>
-            <Text style={styles.battleScore}>{battle.score}</Text>
-            <View style={styles.battleRank}>
-              <Text style={styles.battleRankText}>{battle.rank}</Text>
-            </View>
-          </View>
+           <Pressable
+             accessibilityRole="button"
+             accessibilityLabel={`End ${battle.title} for debugging`}
+             onPress={() => onEndBattle(battle.id)}
+             style={({ pressed }) => [styles.debugEndButton, pressed && { opacity: 0.75 }]}>
+             <Text style={styles.debugEndButtonText}>End battle (debug)</Text>
+           </Pressable>
         </View>
       ))}
       {status === 'ended' &&
@@ -503,6 +606,16 @@ function HomeContent({
             onTogglePin={onTogglePin}
           />
         ))}
+      {status === 'ended' && debugEndedBattles.map((battle) => (
+        <View key={battle.id} style={styles.battleCard}>
+          <Text style={styles.battleCategoryText}>Ended (debug)</Text>
+          <Text style={styles.battleTitle}>{battle.title}</Text>
+          <Text style={styles.battleMetaText}>This battle was ended manually for testing.</Text>
+        </View>
+      ))}
+      {status === 'ended' && userEndedBattles.map((battle) => (
+        <CreatedBattleCard key={battle.id} battle={battle} onTogglePin={onTogglePin} />
+      ))}
       {status === 'mine' && mineBattlesCount === 0 && (
         <View style={styles.emptyMineCard}>
           <Text style={styles.emptyMineIcon}>📌</Text>
@@ -535,7 +648,44 @@ function HomeContent({
       {status === 'mine' && createdBattles.map((battle) => (
         <CreatedBattleCard key={battle.id} battle={battle} onTogglePin={onTogglePin} />
       ))}
-    </ScrollView>
+      </ScrollView>
+
+      <Modal
+        animationType="fade"
+        transparent
+        visible={participationBattle !== null}
+        onRequestClose={() => setParticipationBattle(null)}>
+        <View style={styles.participationOverlay}>
+          <View style={styles.participationSheet}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Cancel joining battle"
+              onPress={() => setParticipationBattle(null)}
+              style={({ pressed }) => [styles.closeParticipationButton, pressed && { opacity: 0.75 }]}>
+              <Text style={styles.closeParticipationText}>×</Text>
+            </Pressable>
+            <Text style={styles.participationTitle}>Add your entry</Text>
+            <Text style={styles.participationSubtitle}>{participationBattle?.title}</Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Take entry photo"
+              onPress={() => chooseParticipationArtwork('camera')}
+              style={({ pressed }) => [styles.participationAction, pressed && { opacity: 0.75 }]}>
+              <Text style={styles.participationActionIcon}>⌾</Text>
+              <Text style={styles.participationActionText}>Camera</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Choose entry from gallery"
+              onPress={() => chooseParticipationArtwork('gallery')}
+              style={({ pressed }) => [styles.participationAction, pressed && { opacity: 0.75 }]}>
+              <Text style={styles.participationActionIcon}>▧</Text>
+              <Text style={styles.participationActionText}>Gallery</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+    </>
   );
 }
 
@@ -625,8 +775,11 @@ function CreatedBattleCard({
         <Text style={styles.battleCategoryText}>{battle.category}</Text>
       </View>
       <Text style={styles.battleTitle}>{battle.title}</Text>
+      {battle.artworkUrl && (
+        <Image accessibilityLabel={`${battle.title} artwork`} source={{ uri: battle.artworkUrl }} style={styles.battleArtwork} />
+      )}
       <Text style={styles.createdByText}>Created by you · {battle.time}</Text>
-      <Text style={styles.battleMetaText}>{battle.rules || 'No rules added'}</Text>
+      <Text style={styles.battleMetaText}>{battle.status === 'ended' ? 'Ended' : battle.rules || 'Open to everyone'}</Text>
     </View>
   );
 }
@@ -2042,6 +2195,102 @@ const baseStyles = StyleSheet.create({
     marginTop: 9,
     color: '#F3F0EB',
     fontSize: 16,
+    fontWeight: '600',
+  },
+  battleArtwork: {
+    width: '100%',
+    height: 170,
+    marginTop: 12,
+    borderRadius: 16,
+  },
+  joinButton: {
+    position: 'absolute',
+    top: 14,
+    right: 52,
+    zIndex: 2,
+    width: 30,
+    height: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 15,
+    backgroundColor: '#F28C28',
+  },
+  joinButtonText: {
+    color: '#171717',
+    fontSize: 24,
+    lineHeight: 27,
+    fontWeight: '700',
+  },
+  debugEndButton: {
+    alignSelf: 'flex-start',
+    marginTop: 12,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#6A4035',
+  },
+  debugEndButtonText: {
+    color: '#D68B76',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  participationOverlay: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+    backgroundColor: 'rgba(0, 0, 0, 0.72)',
+  },
+  participationSheet: {
+    width: '100%',
+    maxWidth: 360,
+    padding: 24,
+    borderRadius: 24,
+    backgroundColor: '#171717',
+  },
+  closeParticipationButton: {
+    position: 'absolute',
+    top: 12,
+    right: 14,
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  closeParticipationText: {
+    color: '#AAA39A',
+    fontSize: 30,
+    lineHeight: 30,
+  },
+  participationTitle: {
+    color: '#F3F0EB',
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  participationSubtitle: {
+    marginTop: 6,
+    marginBottom: 18,
+    color: '#AAA39A',
+    fontSize: 13,
+  },
+  participationAction: {
+    minHeight: 54,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 10,
+    paddingHorizontal: 16,
+    borderRadius: 15,
+    backgroundColor: '#222222',
+  },
+  participationActionIcon: {
+    color: '#F28C28',
+    fontSize: 24,
+  },
+  participationActionText: {
+    color: '#F3F0EB',
+    fontSize: 15,
     fontWeight: '600',
   },
   battleMeta: {
