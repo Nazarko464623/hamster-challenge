@@ -12,27 +12,44 @@ import {
 } from 'react-native';
 
 import { renameMineData } from '@/lib/battles';
-import { getPlayerPreferences, savePlayerPreferences } from '@/lib/player-settings';
+import {
+  formatProfileTags,
+  getPlayerPreferences,
+  getPlayerTags,
+  savePlayerPreferences,
+  savePlayerTags,
+} from '@/lib/player-settings';
 import { supabase } from '@/lib/supabase';
 import { themeColor, useAppTheme, useThemedStyles, type ThemeMode } from '@/components/app-theme-provider';
 
 type PlayerSettingsProps = {
   displayName: string;
+  initialTags?: string;
   onClose: () => void;
   onNameSaved: (name: string) => void;
+  onTagsSaved?: (tags: string) => void;
 };
 
-export function PlayerSettings({ displayName, onClose, onNameSaved }: PlayerSettingsProps) {
+export function PlayerSettings({
+  displayName,
+  initialTags,
+  onClose,
+  onNameSaved,
+  onTagsSaved,
+}: PlayerSettingsProps) {
   const styles = useThemedStyles(baseStyles);
   const { mode, ready: themeReady, setMode, loadError } = useAppTheme();
   const [name, setName] = useState(displayName);
+  const [tags, setTags] = useState(initialTags ?? '');
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [preferencesReady, setPreferencesReady] = useState(false);
   const [savingName, setSavingName] = useState(false);
+  const [savingTags, setSavingTags] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [savingTheme, setSavingTheme] = useState(false);
   const [nameMessage, setNameMessage] = useState('');
+  const [tagsMessage, setTagsMessage] = useState('');
   const [settingsMessage, setSettingsMessage] = useState('');
   const [logoutMessage, setLogoutMessage] = useState('');
   const [appearanceMessage, setAppearanceMessage] = useState('');
@@ -68,6 +85,22 @@ export function PlayerSettings({ displayName, onClose, onNameSaved }: PlayerSett
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    if (initialTags !== undefined) {
+      setTags(initialTags);
+    } else {
+      getPlayerTags(displayName).then((savedTags) => {
+        if (active && savedTags) {
+          setTags(savedTags);
+        }
+      });
+    }
+    return () => {
+      active = false;
+    };
+  }, [displayName, initialTags]);
 
   const updatePreference = async (preference: 'notificationsEnabled' | 'soundEnabled', value: boolean) => {
     if (!preferencesReady) {
@@ -133,6 +166,9 @@ export function PlayerSettings({ displayName, onClose, onNameSaved }: PlayerSett
 
       try {
         await renameMineData(displayName, trimmedName);
+        if (tags) {
+          await savePlayerTags(tags, trimmedName);
+        }
       } catch (error) {
         console.error('Failed to move player battle data after renaming:', error);
         onNameSaved(trimmedName);
@@ -147,6 +183,32 @@ export function PlayerSettings({ displayName, onClose, onNameSaved }: PlayerSett
       setNameMessage('Could not save your player name. Please try again.');
     } finally {
       setSavingName(false);
+    }
+  };
+
+  const saveTags = async () => {
+    const formatted = formatProfileTags(tags);
+    setSavingTags(true);
+    setTagsMessage('');
+    try {
+      await savePlayerTags(formatted, displayName);
+
+      try {
+        await supabase.auth.updateUser({
+          data: { profile_tags: formatted },
+        });
+      } catch (authError) {
+        console.warn('Could not sync tags to supabase auth:', authError);
+      }
+
+      setTags(formatted);
+      onTagsSaved?.(formatted);
+      setTagsMessage(formatted ? 'Profile tags saved.' : 'Profile tags cleared.');
+    } catch (error) {
+      console.error('Failed to save profile tags:', error);
+      setTagsMessage('Could not save your profile tags. Please try again.');
+    } finally {
+      setSavingTags(false);
     }
   };
 
@@ -255,6 +317,36 @@ export function PlayerSettings({ displayName, onClose, onNameSaved }: PlayerSett
             <Text style={styles.saveButtonText}>{savingName ? 'Saving…' : 'Save name'}</Text>
           </Pressable>
           {nameMessage ? <Text style={styles.message}>{nameMessage}</Text> : null}
+        </View>
+
+        <View style={[styles.nameCard, { marginTop: 14 }]}>
+          <Text style={styles.fieldLabel}>Profile tags</Text>
+          <TextInput
+            accessibilityLabel="Profile tags"
+            autoCapitalize="none"
+            maxLength={64}
+            onChangeText={(value) => {
+              setTags(value);
+              setTagsMessage('');
+            }}
+            placeholder="#your teg"
+            placeholderTextColor="#999999"
+            returnKeyType="done"
+            style={styles.nameInput}
+            value={tags}
+          />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Save profile tags"
+            disabled={savingTags}
+            onPress={saveTags}
+            style={({ pressed }) => [
+              styles.saveButton,
+              (pressed || savingTags) && styles.pressed,
+            ]}>
+            <Text style={styles.saveButtonText}>{savingTags ? 'Saving…' : 'Save tags'}</Text>
+          </Pressable>
+          {tagsMessage ? <Text style={styles.message}>{tagsMessage}</Text> : null}
         </View>
       </View>
 

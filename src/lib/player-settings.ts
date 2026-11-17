@@ -45,3 +45,31 @@ export async function getPlayerPreferences(): Promise<PlayerPreferences> {
 export async function savePlayerPreferences(preferences: PlayerPreferences) {
   await AsyncStorage.setItem(storageKey, JSON.stringify(preferences));
 }
+
+const tagsStorageKey = 'hamster-battle:player-tags:v1';
+
+export function formatProfileTags(raw: string): string {
+  if (!raw.trim()) {
+    return '';
+  }
+  const parts = raw
+    .trim()
+    .split(/[\s,]+/)
+    .filter(Boolean)
+    .map((tag) => {
+      const clean = tag.replace(/^#+/, '');
+      return clean ? `#${clean}` : '';
+    })
+    .filter(Boolean);
+  return parts.join('   ');
+}
+
+export async function getPlayerTags(userKey = 'default'): Promise<string> {
+  const value = await AsyncStorage.getItem(`${tagsStorageKey}:${userKey}`);
+  return value ?? '';
+}
+
+export async function savePlayerTags(tags: string, userKey = 'default') {
+  await AsyncStorage.setItem(`${tagsStorageKey}:${userKey}`, tags);
+}
+
