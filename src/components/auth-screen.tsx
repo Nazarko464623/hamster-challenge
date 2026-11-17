@@ -63,15 +63,21 @@ function AuthInput({
   const dropdownHeight = suggestions.length * SUGGESTION_ROW_HEIGHT + 8;
   return (
     <View
-      style={
-        suggestions.length > 0 && [
-          styles.inputWithSuggestions,
-          // The wrapper is stretched over the dropdown (and pulled back with a negative
-          // margin so nothing below moves). On Android a tap only reaches a view that
-          // lies inside its parent's bounds; before, the list hung outside them.
-          { paddingBottom: dropdownHeight + 4, marginBottom: -(dropdownHeight + 4) },
-        ]
-      }>
+      // Android (new architecture) "flattens" a View that has no style of its own. When the
+      // list appeared, the wrapper got a style, Android created it on the spot and moved the
+      // input into it: the input lost focus and the cursor jumped to the nickname field.
+      // collapsable={false} and a style that is always present keep the wrapper in place.
+      collapsable={false}
+      style={[
+        suggestEmails && styles.inputWithSuggestions,
+        // When the list is open the wrapper is stretched over it (and pulled back with a
+        // negative margin so nothing below moves). On Android a tap only reaches a view
+        // that lies inside its parent's bounds.
+        suggestions.length > 0 && {
+          paddingBottom: dropdownHeight + 4,
+          marginBottom: -(dropdownHeight + 4),
+        },
+      ]}>
       <TextInput
         accessibilityLabel={placeholder}
         autoCapitalize="none"
