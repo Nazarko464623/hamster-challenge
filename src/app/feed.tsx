@@ -1,5 +1,4 @@
 import { SymbolView } from 'expo-symbols';
-import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -27,7 +26,16 @@ import Svg, { Circle, Path } from 'react-native-svg';
 
 import { PlayerSettings } from '@/components/player-settings';
 import { themeColor, useAppTheme, useThemedStyles } from '@/components/app-theme-provider';
-import { addBattleEntry, getMineData, getSharedBattles, setBattlePinned, type UserBattle } from '@/lib/battles';
+import { BattleMedia } from '@/components/battle-media';
+import {
+  addBattleEntry,
+  getMineData,
+  getSharedBattles,
+  setBattlePinned,
+  toggleBattleEntryVote,
+  type UserBattle,
+  type UserBattleEntry,
+} from '@/lib/battles';
 import {
   getDirectMessages,
   getMessagingSnapshot,
@@ -183,21 +191,57 @@ export default function FeedScreen() {
     setActiveTab(tabId);
   };
 
-  const handleJoinBattle = async (battleId: string, artworkUri: string) => {
-    const artworkUrl = await addBattleEntry(battleId, artworkUri);
+  const handleJoinBattle = async (
+    battleId: string,
+    artworkUri: string,
+    mediaType: 'image' | 'video'
+  ) => {
+    const entry = await addBattleEntry(battleId, artworkUri, mediaType, displayName);
     setPinnedBattleIds((current) => [...new Set([...current, battleId])]);
     await setBattlePinned(displayName, battleId, true);
     setCreatedBattles((current) =>
       current.map((battle) =>
-        battle.id === battleId ? { ...battle, players: battle.players + 1 } : battle
+        battle.id === battleId
+          ? {
+              ...battle,
+              joined: true,
+              players: battle.players + 1,
+              entries: [...(battle.entries ?? []), entry],
+            }
+          : battle
       )
     );
     setSharedBattles((current) =>
       current.map((battle) =>
-        battle.id === battleId ? { ...battle, players: battle.players + 1 } : battle
+        battle.id === battleId
+          ? {
+              ...battle,
+              joined: true,
+              players: battle.players + 1,
+              entries: [...(battle.entries ?? []), entry],
+            }
+          : battle
       )
     );
-    return artworkUrl;
+    return entry;
+  };
+
+  const handleToggleEntryVote = async (entry: UserBattleEntry) => {
+    await toggleBattleEntryVote(entry.id, entry.votedByMe);
+    const updateEntries = (battle: UserBattle): UserBattle => ({
+      ...battle,
+      entries: battle.entries?.map((item) =>
+        item.id === entry.id
+          ? {
+              ...item,
+              votedByMe: !item.votedByMe,
+              votes: item.votes + (item.votedByMe ? -1 : 1),
+            }
+          : item
+      ),
+    });
+    setCreatedBattles((current) => current.map(updateEntries));
+    setSharedBattles((current) => current.map(updateEntries));
   };
 
   return (
@@ -227,6 +271,7 @@ export default function FeedScreen() {
           createdBattles={createdBattles}
           sharedBattles={sharedBattles}
           onJoinBattle={handleJoinBattle}
+          onToggleEntryVote={handleToggleEntryVote}
           debugEndedBattleIds={debugEndedBattleIds}
           onEndBattle={(battleId) => setDebugEndedBattleIds((current) => [...new Set([...current, battleId])])}
           onTogglePin={async (battleId, pinned) => {
@@ -403,6 +448,7 @@ function HomeContent({
   sharedBattles,
   onTogglePin,
   onJoinBattle,
+  onToggleEntryVote,
   debugEndedBattleIds,
   onEndBattle,
 }: {
@@ -413,7 +459,12 @@ function HomeContent({
   createdBattles: UserBattle[];
   sharedBattles: UserBattle[];
   onTogglePin: (battleId: string, pinned: boolean) => void;
-  onJoinBattle: (battleId: string, artworkUri: string) => Promise<string>;
+  onJoinBattle: (
+    battleId: string,
+    artworkUri: string,
+    mediaType: 'image' | 'video'
+  ) => Promise<UserBattleEntry>;
+  onToggleEntryVote: (entry: UserBattleEntry) => Promise<void>;
   debugEndedBattleIds: string[];
   onEndBattle: (battleId: string) => void;
 }) {
@@ -421,6 +472,7 @@ function HomeContent({
   const [selectedCategory, setSelectedCategory] = useState<BattleCategory>('All');
   const [now, setNow] = useState(Date.now());
   const [participationBattle, setParticipationBattle] = useState<UserBattle | (typeof liveBattles)[number] | null>(null);
+  const [participationError, setParticipationError] = useState<string | null>(null);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(timer);
@@ -451,22 +503,34 @@ function HomeContent({
         ? await ImagePicker.requestCameraPermissionsAsync()
         : await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
+      setParticipationError(
+        source === 'camera'
+          ? 'Camera permission is needed to take a photo.'
+          : 'Media library permission is needed to choose a photo or video.'
+      );
       return;
     }
 
     const result =
       source === 'camera'
         ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.85 })
-        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.85 });
+        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images', 'videos'], quality: 0.85 });
     if (result.canceled) {
       return;
     }
 
     try {
-      await onJoinBattle(participationBattle.id, result.assets[0].uri);
+      const asset = result.assets[0];
+      await onJoinBattle(
+        participationBattle.id,
+        asset.uri,
+        asset.type === 'video' ? 'video' : 'image'
+      );
       setParticipationBattle(null);
+      setParticipationError(null);
     } catch (error) {
       console.error('Failed to add battle entry:', error);
+      setParticipationError('Could not upload your entry. Please try again.');
     }
   };
 
@@ -569,24 +633,49 @@ function HomeContent({
             <Text style={styles.battleCategoryText}>{battle.category}</Text>
           </View>
           <Text style={styles.battleTitle}>{battle.title}</Text>
-           {'artworkUrl' in battle && battle.artworkUrl && (
-             <Image
-               accessibilityLabel={`${battle.title} artwork`}
-               source={{ uri: battle.artworkUrl }}
+           {'owner' in battle && <Text style={styles.battleOwner}>Created by {battle.owner}</Text>}
+           {'entries' in battle && battle.entries && battle.entries.length > 0 && (
+             <BattleEntries entries={battle.entries} onToggleVote={onToggleEntryVote} />
+           )}
+           {'artworkUrl' in battle && battle.artworkUrl && !('entries' in battle && battle.entries?.length) && (
+             <BattleMedia
+               source={battle.artworkUrl}
+               mediaType={'artworkMediaType' in battle ? battle.artworkMediaType ?? 'image' : 'image'}
                style={styles.battleArtwork}
              />
            )}
            <Pressable
              accessibilityRole="button"
-             accessibilityLabel={`Join ${battle.title}`}
-             onPress={() => setParticipationBattle(battle)}
-             style={({ pressed }) => [styles.joinButton, pressed && { opacity: 0.75 }]}>
-             <Text style={styles.joinButtonText}>＋</Text>
+             accessibilityLabel={
+               'joined' in battle && battle.joined
+                 ? `Entry submitted for ${battle.title}`
+                 : `Join ${battle.title}`
+             }
+             accessibilityState={{ disabled: 'joined' in battle && battle.joined }}
+             disabled={'joined' in battle && battle.joined}
+             onPress={() => {
+               setParticipationError(null);
+               setParticipationBattle(battle);
+             }}
+             style={({ pressed }) => [
+               styles.joinButton,
+               'joined' in battle && battle.joined && styles.joinedBattleButton,
+               pressed && { opacity: 0.75 },
+             ]}>
+             <Text
+               style={[
+                 styles.joinButtonText,
+                 'joined' in battle && battle.joined && styles.joinedBattleButtonText,
+               ]}>
+               {'joined' in battle && battle.joined ? 'Entry submitted' : 'Join this battle'}
+             </Text>
            </Pressable>
           <View style={styles.battleMeta}>
             <Text style={styles.battleMetaText}>◷ {battle.time}</Text>
             <Text style={styles.battleMetaText}>{battle.players} players</Text>
-            <Text style={styles.battleJoined}>✓ Joined</Text>
+            {'joined' in battle && battle.joined && (
+              <Text style={styles.battleJoined}>✓ You’re in</Text>
+            )}
           </View>
            <Pressable
              accessibilityRole="button"
@@ -654,18 +743,27 @@ function HomeContent({
         animationType="fade"
         transparent
         visible={participationBattle !== null}
-        onRequestClose={() => setParticipationBattle(null)}>
+        onRequestClose={() => {
+          setParticipationBattle(null);
+          setParticipationError(null);
+        }}>
         <View style={styles.participationOverlay}>
           <View style={styles.participationSheet}>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Cancel joining battle"
-              onPress={() => setParticipationBattle(null)}
+              onPress={() => {
+                setParticipationBattle(null);
+                setParticipationError(null);
+              }}
               style={({ pressed }) => [styles.closeParticipationButton, pressed && { opacity: 0.75 }]}>
               <Text style={styles.closeParticipationText}>×</Text>
             </Pressable>
             <Text style={styles.participationTitle}>Add your entry</Text>
             <Text style={styles.participationSubtitle}>{participationBattle?.title}</Text>
+            {participationError && (
+              <Text accessibilityRole="alert" style={styles.participationError}>{participationError}</Text>
+            )}
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Take entry photo"
@@ -680,12 +778,89 @@ function HomeContent({
               onPress={() => chooseParticipationArtwork('gallery')}
               style={({ pressed }) => [styles.participationAction, pressed && { opacity: 0.75 }]}>
               <Text style={styles.participationActionIcon}>▧</Text>
-              <Text style={styles.participationActionText}>Gallery</Text>
+              <Text style={styles.participationActionText}>Photo or video from gallery</Text>
             </Pressable>
           </View>
         </View>
       </Modal>
     </>
+  );
+}
+
+function BattleEntries({
+  entries,
+  onToggleVote,
+}: {
+  entries: UserBattleEntry[];
+  onToggleVote: (entry: UserBattleEntry) => Promise<void>;
+}) {
+  const styles = useThemedStyles(baseStyles);
+  const visibleEntries = entries.slice(0, 4);
+
+  return (
+    <View style={styles.entriesSection}>
+      <Text style={styles.entriesHeading}>Players’ entries · {entries.length}</Text>
+      <ScrollView
+        horizontal
+        contentContainerStyle={styles.entriesList}
+        showsHorizontalScrollIndicator={false}>
+        {visibleEntries.map((entry) => (
+          <BattleEntryCard key={entry.id} entry={entry} onToggleVote={onToggleVote} />
+        ))}
+      </ScrollView>
+      {entries.length > visibleEntries.length && (
+        <Text style={styles.moreEntriesText}>Showing {visibleEntries.length} recent entries</Text>
+      )}
+    </View>
+  );
+}
+
+function BattleEntryCard({
+  entry,
+  onToggleVote,
+}: {
+  entry: UserBattleEntry;
+  onToggleVote: (entry: UserBattleEntry) => Promise<void>;
+}) {
+  const styles = useThemedStyles(baseStyles);
+  const [votePending, setVotePending] = useState(false);
+  const [voteError, setVoteError] = useState(false);
+  const canVote = !entry.isMine && !entry.id.startsWith('local-');
+
+  const toggleVote = async () => {
+    setVotePending(true);
+    setVoteError(false);
+    try {
+      await onToggleVote(entry);
+    } catch (error) {
+      console.error('Failed to vote on battle entry:', error);
+      setVoteError(true);
+    } finally {
+      setVotePending(false);
+    }
+  };
+
+  return (
+    <View style={styles.entryCard}>
+      <BattleMedia source={entry.mediaUrl} mediaType={entry.mediaType} style={styles.entryMedia} />
+      <Text numberOfLines={1} style={styles.entryCreator}>{entry.creator}</Text>
+      {canVote ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${entry.votedByMe ? 'Remove cheer from' : 'Cheer for'} ${entry.creator}'s entry`}
+          accessibilityState={{ selected: entry.votedByMe, disabled: votePending }}
+          disabled={votePending}
+          onPress={() => void toggleVote()}
+          style={[styles.cheerButton, entry.votedByMe && styles.cheeredButton]}>
+          <Text style={[styles.cheerText, entry.votedByMe && styles.cheeredText]}>
+            {entry.votedByMe ? '♥' : '♡'} Cheer · {entry.votes}
+          </Text>
+        </Pressable>
+      ) : (
+        <Text style={styles.entryVoteCount}>♥ {entry.votes} cheers</Text>
+      )}
+      {voteError && <Text style={styles.voteError}>Couldn’t save cheer</Text>}
+    </View>
   );
 }
 
@@ -776,7 +951,11 @@ function CreatedBattleCard({
       </View>
       <Text style={styles.battleTitle}>{battle.title}</Text>
       {battle.artworkUrl && (
-        <Image accessibilityLabel={`${battle.title} artwork`} source={{ uri: battle.artworkUrl }} style={styles.battleArtwork} />
+        <BattleMedia
+          source={battle.artworkUrl}
+          mediaType={battle.artworkMediaType ?? 'image'}
+          style={styles.battleArtwork}
+        />
       )}
       <Text style={styles.createdByText}>Created by you · {battle.time}</Text>
       <Text style={styles.battleMetaText}>{battle.status === 'ended' ? 'Ended' : battle.rules || 'Open to everyone'}</Text>
@@ -2197,29 +2376,100 @@ const baseStyles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  battleOwner: {
+    marginTop: 4,
+    color: '#AAA39A',
+    fontSize: 12,
+  },
   battleArtwork: {
     width: '100%',
     height: 170,
     marginTop: 12,
     borderRadius: 16,
   },
-  joinButton: {
-    position: 'absolute',
-    top: 14,
-    right: 52,
-    zIndex: 2,
-    width: 30,
-    height: 30,
+  entriesSection: {
+    marginTop: 14,
+  },
+  entriesHeading: {
+    marginBottom: 8,
+    color: '#F3F0EB',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  entriesList: {
+    gap: 10,
+    paddingRight: 4,
+  },
+  entryCard: {
+    width: 220,
+    padding: 8,
+    borderRadius: 16,
+    backgroundColor: '#222222',
+  },
+  entryMedia: {
+    width: '100%',
+    height: 130,
+    borderRadius: 11,
+  },
+  entryCreator: {
+    marginTop: 8,
+    color: '#F3F0EB',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  cheerButton: {
+    minHeight: 34,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 15,
+    marginTop: 6,
+    borderRadius: 12,
+    backgroundColor: '#33302C',
+  },
+  cheeredButton: {
     backgroundColor: '#F28C28',
+  },
+  cheerText: {
+    color: '#F3F0EB',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  cheeredText: {
+    color: '#171717',
+  },
+  entryVoteCount: {
+    marginTop: 9,
+    color: '#F5A047',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  voteError: {
+    marginTop: 4,
+    color: '#FF9B86',
+    fontSize: 11,
+  },
+  moreEntriesText: {
+    marginTop: 6,
+    color: '#AAA39A',
+    fontSize: 11,
+  },
+  joinButton: {
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
+    borderRadius: 22,
+    backgroundColor: '#F28C28',
+  },
+  joinedBattleButton: {
+    backgroundColor: '#3A3530',
   },
   joinButtonText: {
     color: '#171717',
-    fontSize: 24,
-    lineHeight: 27,
+    fontSize: 14,
     fontWeight: '700',
+  },
+  joinedBattleButtonText: {
+    color: '#F3F0EB',
   },
   debugEndButton: {
     alignSelf: 'flex-start',
@@ -2273,6 +2523,11 @@ const baseStyles = StyleSheet.create({
     marginBottom: 18,
     color: '#AAA39A',
     fontSize: 13,
+  },
+  participationError: {
+    marginBottom: 8,
+    color: '#FF9B86',
+    fontSize: 12,
   },
   participationAction: {
     minHeight: 54,
