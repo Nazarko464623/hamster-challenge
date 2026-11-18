@@ -2,6 +2,7 @@ import { SymbolView } from 'expo-symbols';
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import {
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -9,15 +10,15 @@ import {
   Text,
   TextInput,
   View,
+  type SwitchProps,
 } from 'react-native';
 
 import { renameMineData } from '@/lib/battles';
 import {
   formatProfileTags,
-  getPlayerAvatar,
   getPlayerPreferences,
   getPlayerTags,
-  savePlayerAvatar,
+  renamePlayerAvatar,
   savePlayerPreferences,
   savePlayerTags,
 } from '@/lib/player-settings';
@@ -158,7 +159,7 @@ export function PlayerSettings({
     setSavingName(true);
     setNameMessage('');
     try {
-      const { error } = await supabase.auth.updateUser({
+      const { data: updatedUserData, error } = await supabase.auth.updateUser({
         data: { nickname: trimmedName },
       });
       if (error) {
@@ -171,10 +172,7 @@ export function PlayerSettings({
         if (tags) {
           await savePlayerTags(tags, trimmedName);
         }
-        const currentAvatar = await getPlayerAvatar(displayName);
-        if (currentAvatar) {
-          await savePlayerAvatar(currentAvatar, trimmedName);
-        }
+        await renamePlayerAvatar(displayName, trimmedName, updatedUserData.user?.id);
       } catch (error) {
         console.error('Failed to move player battle data after renaming:', error);
         onNameSaved(trimmedName);
@@ -415,6 +413,10 @@ function PreferenceRow({
   onValueChange: (value: boolean) => void;
 }) {
   const styles = useThemedStyles(baseStyles);
+  const activeThumbColor = themeColor('#F28C28', mode);
+  const webSwitchProps: Partial<SwitchProps> & { activeThumbColor?: string } =
+    Platform.OS === 'web' ? { activeThumbColor } : {};
+
   return (
     <View style={styles.preferenceRow}>
       <View style={styles.preferenceText}>
@@ -425,11 +427,13 @@ function PreferenceRow({
         accessibilityLabel={title}
         disabled={disabled}
         onValueChange={onValueChange}
+        ios_backgroundColor={themeColor('#444444', mode, 'backgroundColor')}
         trackColor={{
           false: themeColor('#444444', mode, 'backgroundColor'),
           true: themeColor('#F5B565', mode, 'backgroundColor'),
         }}
         thumbColor={themeColor(enabled ? '#F28C28' : '#AAA39A', mode)}
+        {...webSwitchProps}
         style={styles.preferenceSwitch}
         value={enabled}
       />

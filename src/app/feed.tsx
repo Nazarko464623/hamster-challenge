@@ -29,7 +29,17 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path } from 'react-native-svg';
 
 import { PlayerSettings } from '@/components/player-settings';
-import { getPlayerAvatar, getPlayerTags, removePlayerAvatar, savePlayerAvatar, savePlayerTags } from '@/lib/player-settings';
+import {
+  clearPlayerAvatar,
+  getPlayerAvatar,
+  getPlayerAvatarState,
+  getPlayerTags,
+  isUsableAvatarUri,
+  persistPickedAvatar,
+  savePlayerAvatar,
+  savePlayerTags,
+  syncAvatarWithAuthUser,
+} from '@/lib/player-settings';
 import { themeColor, useAppTheme, useThemedStyles } from '@/components/app-theme-provider';
 import { addBattleEntry, getMineData, getSharedBattles, setBattlePinned, type UserBattle } from '@/lib/battles';
 import {
@@ -153,8 +163,11 @@ export default function FeedScreen() {
   const [debugEndedBattleIds, setDebugEndedBattleIds] = useState<string[]>([]);
   const [showSettings, setShowSettings] = useState(false);
   const [savedDisplayName, setSavedDisplayName] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [userTags, setUserTags] = useState<string>('');
   const [userAvatar, setUserAvatar] = useState<string | null>(null);
+  const avatarMutationVersionRef = useRef(0);
+  const checkedPendingPickerRef = useRef(false);
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { nickname } = useLocalSearchParams<{ nickname?: string }>();
@@ -164,29 +177,112 @@ export default function FeedScreen() {
 
   useEffect(() => {
     let active = true;
-    getPlayerTags(displayName).then((tags) => {
-      if (active && tags) {
-        setUserTags(tags);
-      }
-    });
-    getPlayerAvatar(displayName).then((avatar) => {
-      if (active && avatar) {
-        setUserAvatar(avatar);
-      }
-    });
-    supabase.auth.getUser().then(({ data }) => {
-      const meta = data.user?.user_metadata;
-      if (active && meta) {
-        if (typeof meta.profile_tags === 'string' && meta.profile_tags) {
+    const startAvatarVersion = avatarMutationVersionRef.current;
+
+    const loadUserState = async () => {
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const sessionUser = sessionData.session?.user ?? null;
+
+        let resolvedName = displayName;
+        const hasUrlNickname = typeof nickname === 'string' && nickname.trim().length > 0;
+        if (sessionUser && !savedDisplayName && !hasUrlNickname) {
+          const metaNickname = sessionUser.user_metadata?.nickname;
+          const fallbackName =
+            typeof metaNickname === 'string' && metaNickname.trim()
+              ? metaNickname.trim()
+              : sessionUser.email?.split('@')[0]?.trim();
+          if (fallbackName && fallbackName !== 'Player') {
+            resolvedName = fallbackName;
+            if (active) {
+              setSavedDisplayName(fallbackName);
+            }
+          }
+        }
+
+        if (active && sessionUser?.id) {
+          setCurrentUserId(sessionUser.id);
+        }
+
+        const [savedTags, localAvatarState] = await Promise.all([
+          getPlayerTags(resolvedName),
+          getPlayerAvatarState(resolvedName, sessionUser?.id),
+        ]);
+
+        if (!active) {
+          return;
+        }
+
+        if (savedTags) {
+          setUserTags(savedTags);
+        }
+
+        if (avatarMutationVersionRef.current === startAvatarVersion) {
+          if (localAvatarState?.cleared) {
+            setUserAvatar(null);
+          } else if (localAvatarState?.uri) {
+            setUserAvatar(localAvatarState.uri);
+          } else {
+            const sessionAvatar = sessionUser?.user_metadata?.avatar_url;
+            if (isUsableAvatarUri(sessionAvatar)) {
+              setUserAvatar(sessionAvatar);
+              void savePlayerAvatar(sessionAvatar, resolvedName, sessionUser?.id);
+            }
+          }
+        }
+
+        const { data: userData } = await supabase.auth.getUser();
+        const user = userData.user ?? sessionUser;
+
+        if (!active) {
+          return;
+        }
+
+        if (Platform.OS === 'android' && !checkedPendingPickerRef.current) {
+          checkedPendingPickerRef.current = true;
+          const pending = await ImagePicker.getPendingResultAsync();
+          if (pending && 'canceled' in pending && !pending.canceled && pending.assets?.[0]?.uri) {
+            avatarMutationVersionRef.current += 1;
+            const pendingVersion = avatarMutationVersionRef.current;
+            const pendingAsset = pending.assets[0];
+            if (active) {
+              setUserAvatar(pendingAsset.uri);
+            }
+            const persisted = await persistPickedAvatar(pendingAsset, resolvedName, user?.id);
+            if (active && avatarMutationVersionRef.current === pendingVersion && persisted) {
+              setUserAvatar(persisted);
+            }
+            return;
+          }
+        }
+
+        if (!user) {
+          return;
+        }
+
+        setCurrentUserId(user.id);
+        const meta = user.user_metadata;
+
+        if (typeof meta?.profile_tags === 'string' && meta.profile_tags) {
           setUserTags(meta.profile_tags);
-          savePlayerTags(meta.profile_tags, displayName);
+          void savePlayerTags(meta.profile_tags, resolvedName);
         }
-        if (typeof meta.avatar_url === 'string' && meta.avatar_url) {
-          setUserAvatar(meta.avatar_url);
-          savePlayerAvatar(meta.avatar_url, displayName);
+
+        if (avatarMutationVersionRef.current !== startAvatarVersion) {
+          return;
         }
+
+        const syncedAvatar = await syncAvatarWithAuthUser(user, resolvedName);
+        if (active && avatarMutationVersionRef.current === startAvatarVersion) {
+          setUserAvatar(syncedAvatar);
+        }
+      } catch (err) {
+        console.warn('Could not load player profile state:', err);
       }
-    });
+    };
+
+    void loadUserState();
+
     getMineData(displayName).then((data) => {
       if (active) {
         setPinnedBattleIds(data.pinnedIds);
@@ -201,7 +297,7 @@ export default function FeedScreen() {
     return () => {
       active = false;
     };
-  }, [displayName]);
+  }, [displayName, nickname, savedDisplayName]);
 
   const handlePickAvatar = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -213,34 +309,35 @@ export default function FeedScreen() {
       mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 0.85,
+      quality: 0.75,
+      base64: true,
     });
 
     if (!result.canceled && result.assets?.[0]?.uri) {
-      const uri = result.assets[0].uri;
-      setUserAvatar(uri);
-      await savePlayerAvatar(uri, displayName);
+      const asset = result.assets[0];
+      avatarMutationVersionRef.current += 1;
+      const mutationVersion = avatarMutationVersionRef.current;
+
+      setUserAvatar(asset.uri);
 
       try {
-        await supabase.auth.updateUser({
-          data: { avatar_url: uri },
-        });
+        const persistedUri = await persistPickedAvatar(asset, displayName, currentUserId);
+        if (avatarMutationVersionRef.current === mutationVersion && persistedUri) {
+          setUserAvatar(persistedUri);
+        }
       } catch (err) {
-        console.warn('Could not sync avatar to supabase:', err);
+        console.warn('Could not persist selected avatar:', err);
       }
     }
   };
 
   const handleRemoveAvatar = async () => {
+    avatarMutationVersionRef.current += 1;
     setUserAvatar(null);
-    await removePlayerAvatar(displayName);
-
     try {
-      await supabase.auth.updateUser({
-        data: { avatar_url: null },
-      });
+      await clearPlayerAvatar(displayName, currentUserId);
     } catch (err) {
-      console.warn('Could not sync removed avatar to supabase:', err);
+      console.warn('Could not clear avatar:', err);
     }
   };
 
@@ -374,20 +471,18 @@ function UserAvatar({
   style?: StyleProp<ViewStyle>;
 }) {
   const { mode } = useAppTheme();
-  const [loadFailed, setLoadFailed] = useState(false);
+  const [failedUri, setFailedUri] = useState<string | null>(null);
   const initial = (name.trim()[0] || 'P').toUpperCase();
   const fontSize = Math.round(size * 0.44);
-
-  useEffect(() => {
-    setLoadFailed(false);
-  }, [uri]);
+  const loadFailed = Boolean(uri && failedUri === uri);
 
   if (uri && !loadFailed) {
     return (
       <Image
         key={uri}
         source={{ uri }}
-        onError={() => setLoadFailed(true)}
+        contentFit="cover"
+        onError={() => setFailedUri(uri)}
         accessibilityLabel={`${name} avatar`}
         style={[
           {
@@ -1040,7 +1135,7 @@ function ChatContent({
 }) {
   const styles = useThemedStyles(baseStyles);
   const { mode } = useAppTheme();
-  const [activeAvatar, setActiveAvatar] = useState<string | null>(userAvatar ?? null);
+  const activeAvatar = userAvatar ?? null;
   const [contactAvatars, setContactAvatars] = useState<Record<string, string | null>>({});
   const [filter, setFilter] = useState<'all' | 'unread'>('all');
   const [userId, setUserId] = useState<string | null>(null);
@@ -1058,21 +1153,9 @@ function ChatContent({
   const messageListRef = useRef<ComponentRef<typeof ScrollView>>(null);
 
   useEffect(() => {
-    if (userAvatar) {
-      setActiveAvatar(userAvatar);
-    } else {
-      getPlayerAvatar(displayName).then((saved) => {
-        if (saved) {
-          setActiveAvatar(saved);
-        }
-      });
-    }
-  }, [userAvatar, displayName]);
-
-  useEffect(() => {
     let active = true;
     contacts.forEach((contact) => {
-      getPlayerAvatar(contact.name).then((avatar) => {
+      getPlayerAvatar(contact.name, contact.id).then((avatar) => {
         if (active && avatar) {
           setContactAvatars((prev) => ({
             ...prev,
