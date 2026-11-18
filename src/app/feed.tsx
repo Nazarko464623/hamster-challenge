@@ -27,7 +27,18 @@ import Svg, { Circle, Path } from 'react-native-svg';
 
 import { PlayerSettings } from '@/components/player-settings';
 import { themeColor, useAppTheme, useThemedStyles } from '@/components/app-theme-provider';
-import { addBattleEntry, getMineData, getSharedBattles, setBattlePinned, type UserBattle } from '@/lib/battles';
+import {
+  BATTLE_STATUS_LABELS,
+  BattleClosedError,
+  addBattleEntry,
+  describeBattleStatus,
+  getBattleStatus,
+  getMineData,
+  getSharedBattles,
+  setBattlePinned,
+  type BattleStatus as BattleStage,
+  type UserBattle,
+} from '@/lib/battles';
 import {
   getDirectMessages,
   getMessagingSnapshot,
@@ -274,7 +285,43 @@ export default function FeedScreen() {
 }
 
 function isBattleLive(battle: UserBattle, now: number) {
-  return battle.status === 'live' && (!battle.endsAt || new Date(battle.endsAt).getTime() > now);
+  return getBattleStatus(battle, now) !== 'ended';
+}
+
+type DemoBattle = (typeof liveBattles)[number];
+
+// Demo cards have no dates, so they are treated as open for entries.
+function getCardStage(battle: UserBattle | DemoBattle, now: number): BattleStage {
+  return 'endsAt' in battle ? getBattleStatus(battle, now) : 'open';
+}
+
+function BattleStageBadge({ stage }: { stage: BattleStage }) {
+  const styles = useThemedStyles(baseStyles);
+  return (
+    <View
+      accessibilityLabel={`Status: ${BATTLE_STATUS_LABELS[stage]}`}
+      style={[
+        styles.battleStageBadge,
+        stage === 'active' && styles.battleStageBadgeActive,
+        stage === 'ended' && styles.battleStageBadgeEnded,
+      ]}>
+      <View
+        style={[
+          styles.battleStageDot,
+          stage === 'active' && styles.battleStageDotActive,
+          stage === 'ended' && styles.battleStageDotEnded,
+        ]}
+      />
+      <Text
+        style={[
+          styles.battleStageText,
+          stage === 'active' && styles.battleStageTextActive,
+          stage === 'ended' && styles.battleStageTextEnded,
+        ]}>
+        {BATTLE_STATUS_LABELS[stage]}
+      </Text>
+    </View>
+  );
 }
 
 function dedupeBattles(battles: UserBattle[]) {
@@ -420,7 +467,12 @@ function HomeContent({
   const styles = useThemedStyles(baseStyles);
   const [selectedCategory, setSelectedCategory] = useState<BattleCategory>('All');
   const [now, setNow] = useState(Date.now());
-  const [participationBattle, setParticipationBattle] = useState<UserBattle | (typeof liveBattles)[number] | null>(null);
+  const [participationBattle, setParticipationBattle] = useState<UserBattle | DemoBattle | null>(null);
+  const [participationError, setParticipationError] = useState('');
+  const openParticipation = (battle: UserBattle | DemoBattle) => {
+    setParticipationError('');
+    setParticipationBattle(battle);
+  };
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(timer);
@@ -466,7 +518,12 @@ function HomeContent({
       await onJoinBattle(participationBattle.id, result.assets[0].uri);
       setParticipationBattle(null);
     } catch (error) {
+      if (error instanceof BattleClosedError) {
+        setParticipationError('Entries are closed. This battle is already in voting.');
+        return;
+      }
       console.error('Failed to add battle entry:', error);
+      setParticipationError('Could not add your entry. Please try again.');
     }
   };
 
@@ -558,15 +615,20 @@ function HomeContent({
         </ScrollView>
       )}
 
-      {status === 'live' && visibleLiveBattles.map((battle) => (
+      {status === 'live' && visibleLiveBattles.map((battle) => {
+        const stage = getCardStage(battle, now);
+        return (
         <View key={battle.id} style={styles.battleCard}>
           <PinButton
             pinned={pinnedBattleIds.includes(battle.id)}
             onPress={() => onTogglePin(battle.id, !pinnedBattleIds.includes(battle.id))}
           />
-          <View style={styles.battleCategory}>
-            <Text style={styles.battleCategoryIcon}>{battle.icon}</Text>
-            <Text style={styles.battleCategoryText}>{battle.category}</Text>
+          <View style={styles.battleTagRow}>
+            <View style={styles.battleCategory}>
+              <Text style={styles.battleCategoryIcon}>{battle.icon}</Text>
+              <Text style={styles.battleCategoryText}>{battle.category}</Text>
+            </View>
+            <BattleStageBadge stage={stage} />
           </View>
           <Text style={styles.battleTitle}>{battle.title}</Text>
            {'artworkUrl' in battle && battle.artworkUrl && (
@@ -576,15 +638,19 @@ function HomeContent({
                style={styles.battleArtwork}
              />
            )}
-           <Pressable
-             accessibilityRole="button"
-             accessibilityLabel={`Join ${battle.title}`}
-             onPress={() => setParticipationBattle(battle)}
-             style={({ pressed }) => [styles.joinButton, pressed && { opacity: 0.75 }]}>
-             <Text style={styles.joinButtonText}>＋</Text>
-           </Pressable>
+           {stage === 'open' && (
+             <Pressable
+               accessibilityRole="button"
+               accessibilityLabel={`Join ${battle.title}`}
+               onPress={() => openParticipation(battle)}
+               style={({ pressed }) => [styles.joinButton, pressed && { opacity: 0.75 }]}>
+               <Text style={styles.joinButtonText}>＋</Text>
+             </Pressable>
+           )}
           <View style={styles.battleMeta}>
-            <Text style={styles.battleMetaText}>◷ {battle.time}</Text>
+            <Text style={styles.battleMetaText}>
+              ◷ {'endsAt' in battle ? describeBattleStatus(battle, now) : battle.time}
+            </Text>
             <Text style={styles.battleMetaText}>{battle.players} players</Text>
             <Text style={styles.battleJoined}>✓ Joined</Text>
           </View>
@@ -596,7 +662,8 @@ function HomeContent({
              <Text style={styles.debugEndButtonText}>End battle (debug)</Text>
            </Pressable>
         </View>
-      ))}
+        );
+      })}
       {status === 'ended' &&
         endedGames.map((game) => (
           <EndedGameCard
@@ -666,6 +733,11 @@ function HomeContent({
             </Pressable>
             <Text style={styles.participationTitle}>Add your entry</Text>
             <Text style={styles.participationSubtitle}>{participationBattle?.title}</Text>
+            {participationError ? (
+              <Text accessibilityLiveRegion="polite" style={styles.participationError}>
+                {participationError}
+              </Text>
+            ) : null}
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Take entry photo"
@@ -779,7 +851,11 @@ function CreatedBattleCard({
         <Image accessibilityLabel={`${battle.title} artwork`} source={{ uri: battle.artworkUrl }} style={styles.battleArtwork} />
       )}
       <Text style={styles.createdByText}>Created by you · {battle.time}</Text>
-      <Text style={styles.battleMetaText}>{battle.status === 'ended' ? 'Ended' : battle.rules || 'Open to everyone'}</Text>
+      <View style={styles.battleStageRow}>
+        <BattleStageBadge stage={getBattleStatus(battle)} />
+        <Text style={styles.battleMetaText}>{describeBattleStatus(battle)}</Text>
+      </View>
+      {battle.rules ? <Text style={styles.battleMetaText}>{battle.rules}</Text> : null}
     </View>
   );
 }
@@ -1641,6 +1717,65 @@ const baseStyles = StyleSheet.create({
   emptyMineText: {
     marginTop: 6,
     color: '#AAA39A',
+    fontSize: 13,
+    textAlign: 'center',
+  },
+  battleTagRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+    paddingRight: 36,
+  },
+  battleStageRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+  },
+  battleStageBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 5,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 14,
+    backgroundColor: '#332416',
+  },
+  battleStageBadgeActive: {
+    backgroundColor: '#3A2919',
+  },
+  battleStageBadgeEnded: {
+    backgroundColor: '#2B2B2B',
+  },
+  battleStageDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#5CC27A',
+  },
+  battleStageDotActive: {
+    backgroundColor: '#F28C28',
+  },
+  battleStageDotEnded: {
+    backgroundColor: '#888888',
+  },
+  battleStageText: {
+    color: '#5CC27A',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  battleStageTextActive: {
+    color: '#F28C28',
+  },
+  battleStageTextEnded: {
+    color: '#AAA39A',
+  },
+  participationError: {
+    marginTop: 4,
+    marginBottom: 8,
+    color: '#D47A62',
     fontSize: 13,
     textAlign: 'center',
   },

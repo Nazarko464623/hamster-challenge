@@ -96,7 +96,7 @@ export default function CreateScreen() {
       players: 1,
       score: 0,
       rank: 0,
-      status: 'live',
+      status: 'open',
       createdAt,
       endsAt,
     };
