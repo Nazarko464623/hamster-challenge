@@ -27,7 +27,11 @@ This is an [Expo](https://expo.dev) project created with [`create-expo-app`](htt
 
    Run [`supabase/migrations/20261110130000_direct_messages.sql`](./supabase/migrations/20261110130000_direct_messages.sql) in the Supabase SQL Editor. It creates player profiles and direct-message storage, applies row-level access policies, and enables realtime message updates. Messages are available to signed-in players; a player's email address is never exposed in the player directory.
 
-4. Start the app
+4. Enable battles, media entries, and cheers
+
+   After the direct-messages migration, run [`supabase/migrations/20261110140000_battles.sql`](./supabase/migrations/20261110140000_battles.sql) and [`supabase/migrations/20261117190000_battle_media_and_votes.sql`](./supabase/migrations/20261117190000_battle_media_and_votes.sql) in the Supabase SQL Editor. The latter enables video entries and voting on other players' entries.
+
+5. Start the app
 
    ```bash
    npx expo start

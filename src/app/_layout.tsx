@@ -43,6 +43,8 @@ function RootNavigator() {
         />
         <Stack.Screen name="feed" />
         <Stack.Screen name="create" />
+        <Stack.Screen name="terms" options={{ presentation: 'modal' }} />
+        <Stack.Screen name="privacy" options={{ presentation: 'modal' }} />
         <Stack.Screen
           name="login"
           options={{

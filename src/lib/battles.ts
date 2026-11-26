@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import type { BattleMediaType } from '@/components/battle-media';
 import { supabase } from '@/lib/supabase';
 
 /**
@@ -99,12 +100,25 @@ export type UserBattle = {
   rules: string;
   time: string;
   artworkUrl?: string;
+  artworkMediaType?: BattleMediaType;
+  entries?: UserBattleEntry[];
+  joined?: boolean;
   players: number;
   score: number;
   rank: number;
   status: BattleStatus;
   createdAt: string;
   endsAt?: string;
+};
+
+export type UserBattleEntry = {
+  id: string;
+  creator: string;
+  isMine?: boolean;
+  mediaUrl: string;
+  mediaType: BattleMediaType;
+  votes: number;
+  votedByMe: boolean;
 };
 
 type MineData = {
@@ -119,11 +133,24 @@ function storageKey(user: string) {
   return `${storagePrefix}${encodeURIComponent(user.trim().toLowerCase() || 'player')}`;
 }
 
-export async function addBattleEntry(battleId: string, artworkUri: string) {
+export async function addBattleEntry(
+  battleId: string,
+  artworkUri: string,
+  mediaType: BattleMediaType,
+  creator: string
+): Promise<UserBattleEntry> {
   const { data: sessionData } = await supabase.auth.getSession();
   const user = sessionData.session?.user;
   if (!user || !isUuid(battleId)) {
-    return artworkUri;
+    return {
+      id: `local-${Date.now()}`,
+      creator,
+      isMine: true,
+      mediaUrl: artworkUri,
+      mediaType,
+      votes: 0,
+      votedByMe: false,
+    };
   }
 
   const { data: battleTiming, error: timingError } = await supabase
@@ -141,37 +168,66 @@ export async function addBattleEntry(battleId: string, artworkUri: string) {
     throw new BattleClosedError();
   }
 
-  const artworkPath = `${user.id}/entries/${Date.now()}.${artworkExtension(artworkUri)}`;
+  const artworkPath = `${user.id}/entries/${Date.now()}.${mediaExtension(artworkUri, mediaType)}`;
   const artworkResponse = await fetch(artworkUri);
   const artworkData = await artworkResponse.arrayBuffer();
   const { error: uploadError } = await supabase.storage
     .from('battle-artwork')
     .upload(artworkPath, artworkData, {
       upsert: false,
-      contentType: artworkResponse.headers.get('content-type') ?? 'image/jpeg',
+      contentType: artworkResponse.headers.get('content-type') ?? mediaContentType(mediaType),
     });
   if (uploadError) {
     if (isSupabaseSetupError(uploadError)) {
-      return artworkUri;
+      return {
+        id: `local-${Date.now()}`,
+        creator,
+        isMine: true,
+        mediaUrl: artworkUri,
+        mediaType,
+        votes: 0,
+        votedByMe: false,
+      };
     }
     throw uploadError;
   }
 
   const { data: artworkUrlData } = supabase.storage.from('battle-artwork').getPublicUrl(artworkPath);
   const artworkUrl = artworkUrlData.publicUrl;
-  const { error: entryError } = await supabase.from('battle_entries').insert({
-    battle_id: battleId,
-    creator_id: user.id,
-    artwork_url: artworkUrl,
-  });
+  const { data: entryData, error: entryError } = await supabase
+    .from('battle_entries')
+    .insert({
+      battle_id: battleId,
+      creator_id: user.id,
+      artwork_url: artworkUrl,
+      media_type: mediaType,
+    })
+    .select('id')
+    .single();
   if (entryError) {
     if (isSupabaseSetupError(entryError)) {
-      return artworkUri;
+      return {
+        id: `local-${Date.now()}`,
+        creator,
+        isMine: true,
+        mediaUrl: artworkUri,
+        mediaType,
+        votes: 0,
+        votedByMe: false,
+      };
     }
     throw entryError;
   }
 
-  return artworkUrl;
+  return {
+    id: entryData.id,
+    creator,
+    isMine: true,
+    mediaUrl: artworkUrl,
+    mediaType,
+    votes: 0,
+    votedByMe: false,
+  };
 }
 
 function isUuid(value: string) {
@@ -282,12 +338,21 @@ export type CreateBattleInput = {
   customCategory?: string;
   durationDays: number;
   artworkUri: string;
+  mediaType: BattleMediaType;
   owner: string;
 };
 
-function artworkExtension(uri: string) {
+function mediaExtension(uri: string, mediaType: BattleMediaType) {
   const extension = uri.split('?')[0].split('.').pop()?.toLowerCase();
-  return extension && /^[a-z0-9]+$/.test(extension) ? extension : 'jpg';
+  return extension && /^[a-z0-9]+$/.test(extension)
+    ? extension
+    : mediaType === 'video'
+      ? 'mp4'
+      : 'jpg';
+}
+
+function mediaContentType(mediaType: BattleMediaType) {
+  return mediaType === 'video' ? 'video/mp4' : 'image/jpeg';
 }
 
 export async function createBattleWithEntry(input: CreateBattleInput): Promise<UserBattle | null> {
@@ -299,12 +364,15 @@ export async function createBattleWithEntry(input: CreateBattleInput): Promise<U
 
   const durationDays = Math.min(7, Math.max(1, Math.round(input.durationDays)));
   const endsAt = new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000).toISOString();
-  const artworkPath = `${user.id}/${Date.now()}.${artworkExtension(input.artworkUri)}`;
+  const artworkPath = `${user.id}/${Date.now()}.${mediaExtension(input.artworkUri, input.mediaType)}`;
   const artworkResponse = await fetch(input.artworkUri);
   const artworkData = await artworkResponse.arrayBuffer();
   const { error: uploadError } = await supabase.storage
     .from('battle-artwork')
-    .upload(artworkPath, artworkData, { upsert: false, contentType: artworkResponse.headers.get('content-type') ?? 'image/jpeg' });
+    .upload(artworkPath, artworkData, {
+      upsert: false,
+      contentType: artworkResponse.headers.get('content-type') ?? mediaContentType(input.mediaType),
+    });
   if (uploadError) {
     throw uploadError;
   }
@@ -326,11 +394,16 @@ export async function createBattleWithEntry(input: CreateBattleInput): Promise<U
     throw battleError;
   }
 
-  const { error: entryError } = await supabase.from('battle_entries').insert({
-    battle_id: battleData.id,
-    creator_id: user.id,
-    artwork_url: artworkUrlData.publicUrl,
-  });
+  const { data: entryData, error: entryError } = await supabase
+    .from('battle_entries')
+    .insert({
+      battle_id: battleData.id,
+      creator_id: user.id,
+      artwork_url: artworkUrlData.publicUrl,
+      media_type: input.mediaType,
+    })
+    .select('id')
+    .single();
   if (entryError) {
     throw entryError;
   }
@@ -344,6 +417,19 @@ export async function createBattleWithEntry(input: CreateBattleInput): Promise<U
     rules: input.customCategory?.trim() ?? '',
     time: `${durationDays} ${durationDays === 1 ? 'day' : 'days'}`,
     artworkUrl: artworkUrlData.publicUrl,
+    artworkMediaType: input.mediaType,
+    entries: [
+      {
+        id: entryData.id,
+        creator: input.owner,
+        isMine: true,
+        mediaUrl: artworkUrlData.publicUrl,
+        mediaType: input.mediaType,
+        votes: 0,
+        votedByMe: false,
+      },
+    ],
+    joined: true,
     players: 1,
     score: 0,
     rank: 0,
@@ -355,9 +441,13 @@ export async function createBattleWithEntry(input: CreateBattleInput): Promise<U
 
 export async function getSharedBattles(): Promise<UserBattle[]> {
   const localBattles = await readLocalBattles();
+  const { data: sessionData } = await supabase.auth.getSession();
+  const userId = sessionData.session?.user.id;
   const { data, error } = await supabase
     .from('battles')
-    .select('id, title, category, custom_category, duration_days, created_at, ends_at, owner:profiles(nickname), battle_entries(artwork_url)')
+    .select(
+      'id, title, category, custom_category, duration_days, created_at, ends_at, owner_id, owner:profiles(nickname), battle_entries(id, creator_id, artwork_url, media_type, creator:profiles(nickname), battle_entry_votes(count))'
+    )
     .order('created_at', { ascending: false });
   if (error) {
     if (error.code !== 'PGRST205') {
@@ -366,19 +456,56 @@ export async function getSharedBattles(): Promise<UserBattle[]> {
     return localBattles;
   }
 
+  const remoteEntryIds = (data ?? []).flatMap((battle) =>
+    (Array.isArray(battle.battle_entries) ? battle.battle_entries : []).map((entry) => entry.id)
+  );
+  const votedEntryIds = new Set<string>();
+  if (userId && remoteEntryIds.length > 0) {
+    const { data: votes, error: votesError } = await supabase
+      .from('battle_entry_votes')
+      .select('entry_id')
+      .eq('voter_id', userId)
+      .in('entry_id', remoteEntryIds);
+    if (votesError) {
+      console.error('Failed to load battle entry votes:', votesError);
+    } else {
+      for (const vote of votes ?? []) {
+        votedEntryIds.add(vote.entry_id);
+      }
+    }
+  }
+
   const remoteBattles: UserBattle[] = (data ?? []).map((battle) => {
     const owner = Array.isArray(battle.owner) ? battle.owner[0] : battle.owner;
     const entries = Array.isArray(battle.battle_entries) ? battle.battle_entries : [];
+    const mappedEntries: UserBattleEntry[] = entries.map((entry) => {
+      const creator = Array.isArray(entry.creator) ? entry.creator[0] : entry.creator;
+      const voteRelation = Array.isArray(entry.battle_entry_votes)
+        ? entry.battle_entry_votes[0]
+        : entry.battle_entry_votes;
+      return {
+        id: entry.id,
+        creator: creator?.nickname ?? 'Player',
+        isMine: entry.creator_id === userId,
+        mediaUrl: entry.artwork_url,
+        mediaType: entry.media_type === 'video' ? 'video' : 'image',
+        votes: Number(voteRelation?.count ?? 0),
+        votedByMe: votedEntryIds.has(entry.id),
+      };
+    });
     const durationDays = Number(battle.duration_days);
     return {
       id: battle.id,
+      joined: userId ? entries.some((entry) => entry.creator_id === userId) : false,
       owner: owner?.nickname ?? 'Player',
       title: battle.title,
       category: battle.category,
       icon: categoryIcon(battle.category),
       rules: battle.custom_category ?? '',
       time: `${durationDays} ${durationDays === 1 ? 'day' : 'days'}`,
-      artworkUrl: entries[0]?.artwork_url,
+      artworkUrl: mappedEntries[0]?.mediaUrl,
+      artworkMediaType: mappedEntries[0]?.mediaType,
+      entries: mappedEntries,
       players: entries.length,
       score: 0,
       rank: 0,
@@ -389,6 +516,28 @@ export async function getSharedBattles(): Promise<UserBattle[]> {
   });
   const remoteIds = new Set(remoteBattles.map((battle) => battle.id));
   return [...remoteBattles, ...localBattles.filter((battle) => !remoteIds.has(battle.id))];
+}
+
+export async function toggleBattleEntryVote(entryId: string, voted: boolean) {
+  const { data: sessionData } = await supabase.auth.getSession();
+  const user = sessionData.session?.user;
+  if (!user) {
+    throw new Error('Sign in to vote on battle entries.');
+  }
+
+  const result = voted
+    ? await supabase
+        .from('battle_entry_votes')
+        .delete()
+        .eq('entry_id', entryId)
+        .eq('voter_id', user.id)
+    : await supabase.from('battle_entry_votes').insert({
+        entry_id: entryId,
+        voter_id: user.id,
+      });
+  if (result.error) {
+    throw result.error;
+  }
 }
 
 function categoryIcon(category: string) {

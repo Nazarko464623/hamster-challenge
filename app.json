@@ -39,9 +39,17 @@
       ],
       "expo-font",
       "expo-image",
-      "expo-image-picker",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Allow Hamster Challenge to take photos for battles.",
+          "photosPermission": "Allow Hamster Challenge to choose photos and videos for battles.",
+          "microphonePermission": false
+        }
+      ],
       "expo-status-bar",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-video"
     ],
     "experiments": {
       "typedRoutes": true,

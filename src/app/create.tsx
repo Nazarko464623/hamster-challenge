@@ -4,7 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import { useFonts } from 'expo-font';
 import Slider from '@react-native-community/slider';
-import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   Easing,
@@ -17,6 +17,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import Svg, { Path } from 'react-native-svg';
 
+import { BattleMedia, type BattleMediaType } from '@/components/battle-media';
 import { createBattleWithEntry, saveCreatedBattle, type UserBattle } from '@/lib/battles';
 import { themeColor, useAppTheme, useThemedStyles } from '@/components/app-theme-provider';
 
@@ -45,9 +46,12 @@ export default function CreateScreen() {
   const [customCategory, setCustomCategory] = useState('');
   const [category, setCategory] = useState<(typeof categories)[number] | null>(null);
   const [durationDays, setDurationDays] = useState(1);
-  const [artworkUri, setArtworkUri] = useState<string | null>(null);
+  const [artwork, setArtwork] = useState<ImagePicker.ImagePickerAsset | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const artworkMediaType: BattleMediaType = artwork?.type === 'video' ? 'video' : 'image';
   const isCreateDisabled =
-    !title.trim() || !category || (category === 'other' && !customCategory.trim()) || !artworkUri;
+    !title.trim() || !category || (category === 'other' && !customCategory.trim()) || !artwork;
 
   const chooseArtwork = async (source: 'camera' | 'gallery') => {
     const permission =
@@ -55,21 +59,30 @@ export default function CreateScreen() {
         ? await ImagePicker.requestCameraPermissionsAsync()
         : await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
+      setErrorMessage(
+        source === 'camera'
+          ? 'Camera permission is needed to take a photo.'
+          : 'Media library permission is needed to choose a photo or video.'
+      );
       return;
     }
 
     const result =
       source === 'camera'
         ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.85 })
-        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.85 });
+        : await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ['images', 'videos'],
+            quality: 0.85,
+          });
     if (!result.canceled) {
-      setArtworkUri(result.assets[0].uri);
+      setArtwork(result.assets[0]);
+      setErrorMessage(null);
     }
   };
 
   const createBattle = async () => {
     const owner = typeof nickname === 'string' && nickname.trim() ? nickname.trim() : 'Player';
-    if (isCreateDisabled || !category || !artworkUri) {
+    if (isCreateDisabled || !category || !artwork) {
       return;
     }
 
@@ -92,7 +105,17 @@ export default function CreateScreen() {
       icon: categoryIcons[category],
       rules: customCategory.trim(),
       time: `${durationDays} ${durationDays === 1 ? 'day' : 'days'}`,
-      artworkUrl: artworkUri,
+      artworkUrl: artwork.uri,
+      artworkMediaType,
+      entries: [{
+        id: `local-entry-${Date.now()}`,
+        creator: owner,
+        mediaUrl: artwork.uri,
+        mediaType: artworkMediaType,
+        votes: 0,
+        votedByMe: false,
+      }],
+      joined: true,
       players: 1,
       score: 0,
       rank: 0,
@@ -101,20 +124,30 @@ export default function CreateScreen() {
       endsAt,
     };
 
+    setIsCreating(true);
+    setErrorMessage(null);
     try {
       const sharedBattle = await createBattleWithEntry({
         title,
         category: category[0].toUpperCase() + category.slice(1),
         customCategory: category === 'other' ? customCategory : undefined,
         durationDays,
-        artworkUri,
+        artworkUri: artwork.uri,
+        mediaType: artworkMediaType,
         owner,
       });
       await saveCreatedBattle(owner, sharedBattle ?? battle);
-    } catch {
-      await saveCreatedBattle(owner, battle);
+      router.replace({ pathname: '/feed', params: { nickname: owner } });
+    } catch (error) {
+      console.error('Failed to create battle:', error);
+      setErrorMessage(
+        error instanceof Error && error.message.toLowerCase().includes('bucket not found')
+          ? 'Battle media storage is missing. Run the battles migration in your Supabase project, then try again.'
+          : 'Could not create the battle. Please check your connection and try again.'
+      );
+    } finally {
+      setIsCreating(false);
     }
-    router.replace({ pathname: '/feed', params: { nickname: owner } });
   };
 
   if (fontError) {
@@ -191,7 +224,7 @@ export default function CreateScreen() {
         </View>}
 
         <View style={styles.fieldSection}>
-          <Text style={styles.sectionLabel}>Add your artwork</Text>
+          <Text style={styles.sectionLabel}>Add your photo or video</Text>
           <View style={styles.artworkActions}>
             <Pressable accessibilityRole="button" accessibilityLabel="Take artwork photo" onPress={() => chooseArtwork('camera')} style={styles.artworkButton}>
               <Text style={styles.artworkButtonIcon}>⌾</Text>
@@ -202,14 +235,20 @@ export default function CreateScreen() {
               <Text style={styles.artworkButtonText}>Gallery</Text>
             </Pressable>
           </View>
-          {artworkUri && <Image accessibilityLabel="Selected artwork" source={{ uri: artworkUri }} style={styles.artworkPreview} />}
-          {artworkUri && (
+          {artwork && (
+            <BattleMedia
+              source={artwork.uri}
+              mediaType={artworkMediaType}
+              style={styles.artworkPreview}
+            />
+          )}
+          {artwork && (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Remove selected artwork"
-              onPress={() => setArtworkUri(null)}
+              onPress={() => setArtwork(null)}
               style={({ pressed }) => [styles.removeArtworkButton, pressed && styles.pressed]}>
-              <Text style={styles.removeArtworkText}>Remove artwork</Text>
+              <Text style={styles.removeArtworkText}>Remove media</Text>
             </Pressable>
           )}
         </View>
@@ -226,23 +265,24 @@ export default function CreateScreen() {
       </ScrollView>
 
       <View style={[styles.createFooter, { paddingBottom: Math.max(insets.bottom, 24) + 8 }]}>
+        {errorMessage && <Text accessibilityRole="alert" style={styles.errorText}>{errorMessage}</Text>}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Create battle"
-          disabled={isCreateDisabled}
+          disabled={isCreateDisabled || isCreating}
           onPress={createBattle}
           style={({ pressed }) => [
             styles.createButton,
-            isCreateDisabled && styles.disabledCreateButton,
+            (isCreateDisabled || isCreating) && styles.disabledCreateButton,
             pressed && styles.pressed,
           ]}>
           <Text
             style={[
               styles.createButtonText,
-              isCreateDisabled && styles.disabledCreateButtonText,
+              (isCreateDisabled || isCreating) && styles.disabledCreateButtonText,
               fontsLoaded && styles.loadedCreateButtonText,
             ]}>
-            Create
+            {isCreating ? 'Creating…' : 'Create'}
           </Text>
         </Pressable>
       </View>
@@ -424,6 +464,12 @@ const baseStyles = StyleSheet.create({
   createFooter: {
     paddingHorizontal: 24,
     paddingTop: 10,
+  },
+  errorText: {
+    marginBottom: 8,
+    color: '#FF9B86',
+    fontSize: 13,
+    textAlign: 'center',
   },
   createButton: {
     minHeight: 58,
