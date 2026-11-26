@@ -42,11 +42,16 @@ import {
 import { themeColor, useAppTheme, useThemedStyles } from '@/components/app-theme-provider';
 import { BattleMedia } from '@/components/battle-media';
 import {
+  BATTLE_STATUS_LABELS,
+  BattleClosedError,
   addBattleEntry,
+  describeBattleStatus,
+  getBattleStatus,
   getMineData,
   getSharedBattles,
   setBattlePinned,
   toggleBattleEntryVote,
+  type BattleStatus as BattleStage,
   type UserBattle,
   type UserBattleEntry,
 } from '@/lib/battles';
@@ -497,7 +502,43 @@ export default function FeedScreen() {
 }
 
 function isBattleLive(battle: UserBattle, now: number) {
-  return battle.status === 'live' && (!battle.endsAt || new Date(battle.endsAt).getTime() > now);
+  return getBattleStatus(battle, now) !== 'ended';
+}
+
+type DemoBattle = (typeof liveBattles)[number];
+
+// Demo cards have no dates, so they are treated as open for entries.
+function getCardStage(battle: UserBattle | DemoBattle, now: number): BattleStage {
+  return 'endsAt' in battle ? getBattleStatus(battle, now) : 'open';
+}
+
+function BattleStageBadge({ stage }: { stage: BattleStage }) {
+  const styles = useThemedStyles(baseStyles);
+  return (
+    <View
+      accessibilityLabel={`Status: ${BATTLE_STATUS_LABELS[stage]}`}
+      style={[
+        styles.battleStageBadge,
+        stage === 'active' && styles.battleStageBadgeActive,
+        stage === 'ended' && styles.battleStageBadgeEnded,
+      ]}>
+      <View
+        style={[
+          styles.battleStageDot,
+          stage === 'active' && styles.battleStageDotActive,
+          stage === 'ended' && styles.battleStageDotEnded,
+        ]}
+      />
+      <Text
+        style={[
+          styles.battleStageText,
+          stage === 'active' && styles.battleStageTextActive,
+          stage === 'ended' && styles.battleStageTextEnded,
+        ]}>
+        {BATTLE_STATUS_LABELS[stage]}
+      </Text>
+    </View>
+  );
 }
 
 function dedupeBattles(battles: UserBattle[]) {
@@ -728,7 +769,7 @@ function HomeContent({
   const styles = useThemedStyles(baseStyles);
   const [selectedCategory, setSelectedCategory] = useState<BattleCategory>('All');
   const [now, setNow] = useState(Date.now());
-  const [participationBattle, setParticipationBattle] = useState<UserBattle | (typeof liveBattles)[number] | null>(null);
+  const [participationBattle, setParticipationBattle] = useState<UserBattle | DemoBattle | null>(null);
   const [participationError, setParticipationError] = useState<string | null>(null);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 30_000);
@@ -786,6 +827,10 @@ function HomeContent({
       setParticipationBattle(null);
       setParticipationError(null);
     } catch (error) {
+      if (error instanceof BattleClosedError) {
+        setParticipationError('Entries are closed. This battle is already in voting.');
+        return;
+      }
       console.error('Failed to add battle entry:', error);
       setParticipationError('Could not upload your entry. Please try again.');
     }
@@ -883,6 +928,7 @@ function HomeContent({
       )}
 
       {status === 'live' && visibleLiveBattles.map((battle) => {
+        const stage = getCardStage(battle, now);
         const battleOwner = ('owner' in battle && typeof battle.owner === 'string' && battle.owner) ? battle.owner : 'Player';
         return (
         <View key={battle.id} style={styles.battleCard}>
@@ -891,9 +937,12 @@ function HomeContent({
             onPress={() => onTogglePin(battle.id, !pinnedBattleIds.includes(battle.id))}
           />
           <View style={styles.battleHeaderRow}>
-            <View style={styles.battleCategory}>
-              <Text style={styles.battleCategoryIcon}>{battle.icon}</Text>
-              <Text style={styles.battleCategoryText}>{battle.category}</Text>
+            <View style={styles.battleTagRow}>
+              <View style={styles.battleCategory}>
+                <Text style={styles.battleCategoryIcon}>{battle.icon}</Text>
+                <Text style={styles.battleCategoryText}>{battle.category}</Text>
+              </View>
+              <BattleStageBadge stage={stage} />
             </View>
             <View style={styles.battleCreatorBadge}>
               <UserAvatar
@@ -907,7 +956,11 @@ function HomeContent({
           <Text style={styles.battleTitle}>{battle.title}</Text>
            {'owner' in battle && <Text style={styles.battleOwner}>Created by {battle.owner}</Text>}
            {'entries' in battle && battle.entries && battle.entries.length > 0 && (
-             <BattleEntries entries={battle.entries} onToggleVote={onToggleEntryVote} />
+             <BattleEntries
+               entries={battle.entries}
+               votingOpen={stage === 'active'}
+               onToggleVote={onToggleEntryVote}
+             />
            )}
            {'artworkUrl' in battle && battle.artworkUrl && !('entries' in battle && battle.entries?.length) && (
              <BattleMedia
@@ -916,34 +969,38 @@ function HomeContent({
                style={styles.battleArtwork}
              />
            )}
-           <Pressable
-             accessibilityRole="button"
-             accessibilityLabel={
-               'joined' in battle && battle.joined
-                 ? `Entry submitted for ${battle.title}`
-                 : `Join ${battle.title}`
-             }
-             accessibilityState={{ disabled: 'joined' in battle && battle.joined }}
-             disabled={'joined' in battle && battle.joined}
-             onPress={() => {
-               setParticipationError(null);
-               setParticipationBattle(battle);
-             }}
-             style={({ pressed }) => [
-               styles.joinButton,
-               'joined' in battle && battle.joined && styles.joinedBattleButton,
-               pressed && { opacity: 0.75 },
-             ]}>
-             <Text
-               style={[
-                 styles.joinButtonText,
-                 'joined' in battle && battle.joined && styles.joinedBattleButtonText,
+           {(stage === 'open' || ('joined' in battle && battle.joined)) && (
+             <Pressable
+               accessibilityRole="button"
+               accessibilityLabel={
+                 'joined' in battle && battle.joined
+                   ? `Entry submitted for ${battle.title}`
+                   : `Join ${battle.title}`
+               }
+               accessibilityState={{ disabled: 'joined' in battle && battle.joined }}
+               disabled={'joined' in battle && battle.joined}
+               onPress={() => {
+                 setParticipationError(null);
+                 setParticipationBattle(battle);
+               }}
+               style={({ pressed }) => [
+                 styles.joinButton,
+                 'joined' in battle && battle.joined && styles.joinedBattleButton,
+                 pressed && { opacity: 0.75 },
                ]}>
-               {'joined' in battle && battle.joined ? 'Entry submitted' : 'Join this battle'}
-             </Text>
-           </Pressable>
+               <Text
+                 style={[
+                   styles.joinButtonText,
+                   'joined' in battle && battle.joined && styles.joinedBattleButtonText,
+                 ]}>
+                 {'joined' in battle && battle.joined ? 'Entry submitted' : 'Join this battle'}
+               </Text>
+             </Pressable>
+           )}
           <View style={styles.battleMeta}>
-            <Text style={styles.battleMetaText}>◷ {battle.time}</Text>
+            <Text style={styles.battleMetaText}>
+              ◷ {'endsAt' in battle ? describeBattleStatus(battle, now) : battle.time}
+            </Text>
             <Text style={styles.battleMetaText}>{battle.players} players</Text>
             {'joined' in battle && battle.joined && (
               <Text style={styles.battleJoined}>✓ You’re in</Text>
@@ -957,7 +1014,7 @@ function HomeContent({
              <Text style={styles.debugEndButtonText}>End battle (debug)</Text>
            </Pressable>
         </View>
-      );
+        );
       })}
       {status === 'ended' &&
         endedGames.map((game) => (
@@ -1078,9 +1135,12 @@ function HomeContent({
 
 function BattleEntries({
   entries,
+  votingOpen,
   onToggleVote,
 }: {
   entries: UserBattleEntry[];
+  // Votes are accepted only in the Voting stage (see SCRUM-34 / format in SCRUM-42).
+  votingOpen: boolean;
   onToggleVote: (entry: UserBattleEntry) => Promise<void>;
 }) {
   const styles = useThemedStyles(baseStyles);
@@ -1089,12 +1149,20 @@ function BattleEntries({
   return (
     <View style={styles.entriesSection}>
       <Text style={styles.entriesHeading}>Players’ entries · {entries.length}</Text>
+      {!votingOpen && (
+        <Text style={styles.votingClosedText}>Voting starts when entries close</Text>
+      )}
       <ScrollView
         horizontal
         contentContainerStyle={styles.entriesList}
         showsHorizontalScrollIndicator={false}>
         {visibleEntries.map((entry) => (
-          <BattleEntryCard key={entry.id} entry={entry} onToggleVote={onToggleVote} />
+          <BattleEntryCard
+            key={entry.id}
+            entry={entry}
+            votingOpen={votingOpen}
+            onToggleVote={onToggleVote}
+          />
         ))}
       </ScrollView>
       {entries.length > visibleEntries.length && (
@@ -1106,15 +1174,17 @@ function BattleEntries({
 
 function BattleEntryCard({
   entry,
+  votingOpen,
   onToggleVote,
 }: {
   entry: UserBattleEntry;
+  votingOpen: boolean;
   onToggleVote: (entry: UserBattleEntry) => Promise<void>;
 }) {
   const styles = useThemedStyles(baseStyles);
   const [votePending, setVotePending] = useState(false);
   const [voteError, setVoteError] = useState(false);
-  const canVote = !entry.isMine && !entry.id.startsWith('local-');
+  const canVote = votingOpen && !entry.isMine && !entry.id.startsWith('local-');
 
   const toggleVote = async () => {
     setVotePending(true);
@@ -1258,7 +1328,11 @@ function CreatedBattleCard({
         <UserAvatar name={battle.owner || displayName} uri={userAvatar} size={28} />
         <Text style={styles.createdByText}>Created by you · {battle.time}</Text>
       </View>
-      <Text style={styles.battleMetaText}>{battle.status === 'ended' ? 'Ended' : battle.rules || 'Open to everyone'}</Text>
+      <View style={styles.battleStageRow}>
+        <BattleStageBadge stage={getBattleStatus(battle)} />
+        <Text style={styles.battleMetaText}>{describeBattleStatus(battle)}</Text>
+      </View>
+      {battle.rules ? <Text style={styles.battleMetaText}>{battle.rules}</Text> : null}
     </View>
   );
 }
@@ -2412,6 +2486,58 @@ const baseStyles = StyleSheet.create({
     fontSize: 13,
     textAlign: 'center',
   },
+  battleTagRow: {
+    flexShrink: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  battleStageRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+  },
+  battleStageBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 5,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 14,
+    backgroundColor: '#332416',
+  },
+  battleStageBadgeActive: {
+    backgroundColor: '#3A2919',
+  },
+  battleStageBadgeEnded: {
+    backgroundColor: '#2B2B2B',
+  },
+  battleStageDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#5CC27A',
+  },
+  battleStageDotActive: {
+    backgroundColor: '#F28C28',
+  },
+  battleStageDotEnded: {
+    backgroundColor: '#888888',
+  },
+  battleStageText: {
+    color: '#5CC27A',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  battleStageTextActive: {
+    color: '#F28C28',
+  },
+  battleStageTextEnded: {
+    color: '#AAA39A',
+  },
   createdByText: {
     marginTop: 8,
     color: '#F5A047',
@@ -3063,6 +3189,12 @@ const baseStyles = StyleSheet.create({
     color: '#F5A047',
     fontSize: 12,
     fontWeight: '600',
+  },
+  votingClosedText: {
+    marginTop: 2,
+    marginBottom: 6,
+    color: '#AAA39A',
+    fontSize: 12,
   },
   voteError: {
     marginTop: 4,

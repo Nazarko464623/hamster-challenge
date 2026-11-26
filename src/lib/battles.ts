@@ -3,7 +3,93 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { BattleMediaType } from '@/components/battle-media';
 import { supabase } from '@/lib/supabase';
 
-export type BattleStatus = 'live' | 'ended';
+/**
+ * Battle lifecycle (SCRUM-34):
+ * - open:   players join and submit entries; voting is not available yet
+ * - active: entries are closed, everyone votes (second half of the battle time)
+ * - ended:  voting is closed, the winner is decided
+ *
+ * The first half of the battle duration is for entries, the second half for voting.
+ * Example: a 4-day battle has 2 days of entries, then 2 days of voting.
+ */
+export type BattleStatus = 'open' | 'active' | 'ended';
+
+export const BATTLE_STATUS_LABELS: Record<BattleStatus, string> = {
+  open: 'Open',
+  active: 'Voting',
+  ended: 'Ended',
+};
+
+type BattleTiming = { createdAt?: string; endsAt?: string };
+
+function parseTime(value?: string) {
+  const time = value ? new Date(value).getTime() : NaN;
+  return Number.isFinite(time) ? time : null;
+}
+
+/** Moment when entries close and voting starts (middle of the battle). */
+export function getVotingStartsAt(battle: BattleTiming): number | null {
+  const createdAt = parseTime(battle.createdAt);
+  const endsAt = parseTime(battle.endsAt);
+  if (createdAt === null || endsAt === null || endsAt <= createdAt) {
+    return null;
+  }
+  return createdAt + (endsAt - createdAt) / 2;
+}
+
+/** Status of a battle at a given moment, worked out from its dates. */
+export function getBattleStatus(battle: BattleTiming, now = Date.now()): BattleStatus {
+  const endsAt = parseTime(battle.endsAt);
+  if (endsAt === null) {
+    // Battles without dates (old local data, demo cards) stay open.
+    return 'open';
+  }
+  if (now >= endsAt) {
+    return 'ended';
+  }
+  const votingStartsAt = getVotingStartsAt(battle);
+  return votingStartsAt !== null && now >= votingStartsAt ? 'active' : 'open';
+}
+
+/** Time left until the current stage changes, e.g. "1d 4h", "5h 11m", "12m". */
+export function getBattleTimeLeft(battle: BattleTiming, now = Date.now()): string | null {
+  const status = getBattleStatus(battle, now);
+  const target = status === 'open' ? getVotingStartsAt(battle) : status === 'active' ? parseTime(battle.endsAt) : null;
+  if (target === null) {
+    return null;
+  }
+  const minutes = Math.max(1, Math.ceil((target - now) / 60_000));
+  const days = Math.floor(minutes / (24 * 60));
+  const hours = Math.floor((minutes % (24 * 60)) / 60);
+  const restMinutes = minutes % 60;
+  if (days > 0) {
+    return `${days}d ${hours}h`;
+  }
+  if (hours > 0) {
+    return `${hours}h ${restMinutes}m`;
+  }
+  return `${restMinutes}m`;
+}
+
+/** Short line for a battle card, e.g. "Entries close in 5h 11m". */
+export function describeBattleStatus(battle: BattleTiming, now = Date.now()): string {
+  const status = getBattleStatus(battle, now);
+  const timeLeft = getBattleTimeLeft(battle, now);
+  if (status === 'open') {
+    return timeLeft ? `Entries close in ${timeLeft}` : 'Open for entries';
+  }
+  if (status === 'active') {
+    return timeLeft ? `Voting ends in ${timeLeft}` : 'Voting';
+  }
+  return 'Ended';
+}
+
+export class BattleClosedError extends Error {
+  constructor() {
+    super('Entries for this battle are closed.');
+    this.name = 'BattleClosedError';
+  }
+}
 
 export type UserBattle = {
   id: string;
@@ -65,6 +151,21 @@ export async function addBattleEntry(
       votes: 0,
       votedByMe: false,
     };
+  }
+
+  const { data: battleTiming, error: timingError } = await supabase
+    .from('battles')
+    .select('created_at, ends_at')
+    .eq('id', battleId)
+    .maybeSingle();
+  if (timingError && !isSupabaseSetupError(timingError)) {
+    throw timingError;
+  }
+  if (
+    battleTiming &&
+    getBattleStatus({ createdAt: battleTiming.created_at, endsAt: battleTiming.ends_at }) !== 'open'
+  ) {
+    throw new BattleClosedError();
   }
 
   const artworkPath = `${user.id}/entries/${Date.now()}.${mediaExtension(artworkUri, mediaType)}`;
@@ -332,7 +433,7 @@ export async function createBattleWithEntry(input: CreateBattleInput): Promise<U
     players: 1,
     score: 0,
     rank: 0,
-    status: 'live',
+    status: 'open',
     createdAt: battleData.created_at,
     endsAt,
   };
@@ -408,7 +509,7 @@ export async function getSharedBattles(): Promise<UserBattle[]> {
       players: entries.length,
       score: 0,
       rank: 0,
-      status: (new Date(battle.ends_at).getTime() > Date.now() ? 'live' : 'ended') as BattleStatus,
+      status: getBattleStatus({ createdAt: battle.created_at, endsAt: battle.ends_at }),
       createdAt: battle.created_at,
       endsAt: battle.ends_at,
     };
