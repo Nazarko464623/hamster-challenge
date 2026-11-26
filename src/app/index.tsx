@@ -3,14 +3,15 @@ import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { welcomeBlurTarget } from '@/components/auth-blur-target';
-import { useThemedStyles } from '@/components/app-theme-provider';
+import { useAppTheme, useThemedStyles } from '@/components/app-theme-provider';
 import { supabase } from '@/lib/supabase';
 
 export default function WelcomeScreen() {
   const styles = useThemedStyles(baseStyles);
+  const { mode } = useAppTheme();
   useEffect(() => {
     let isMounted = true;
 
@@ -51,7 +52,7 @@ export default function WelcomeScreen() {
       <Image
         accessibilityLabel="HamstBattle hamster logo"
         contentFit="contain"
-        source={require('@/assets/images/hamster-logo.png')}
+        source={require('@/assets/icons/homyak.svg')}
         style={styles.hamsterLogo}
       />
 
@@ -63,10 +64,10 @@ export default function WelcomeScreen() {
           style={({ pressed }) => [
             styles.button,
             styles.signUpButton,
-            pressed && styles.pressedButton,
+            pressed && styles.pressedSignUpButton,
           ]}>
           {({ pressed }) => (
-            <Text style={[styles.signUpText, pressed && styles.pressedButtonText]}>Sign up</Text>
+            <Text style={[styles.signUpText, pressed && styles.pressedSignUpText]}>Sign up</Text>
           )}
         </Pressable>
         <Pressable
@@ -76,10 +77,10 @@ export default function WelcomeScreen() {
           style={({ pressed }) => [
             styles.button,
             styles.logInButton,
-            pressed && styles.pressedButton,
+            pressed && styles.pressedLogInButton,
           ]}>
           {({ pressed }) => (
-            <Text style={[styles.logInText, pressed && styles.pressedButtonText]}>Log in</Text>
+            <Text style={[styles.logInText, pressed && styles.pressedLogInText]}>Log in</Text>
           )}
         </Pressable>
       </View>
@@ -92,7 +93,11 @@ export default function WelcomeScreen() {
       <Image
         accessibilityLabel="JoPa production"
         contentFit="contain"
-        source={require('@/assets/images/jopa-production.png')}
+        source={
+          mode === 'dark'
+            ? require('@/assets/icons/JoPa production.svg')
+            : require('@/assets/icons/JoPa production-light.svg')
+        }
         style={styles.productionLogo}
       />
     </BlurTargetView>
@@ -103,7 +108,7 @@ const baseStyles = StyleSheet.create({
   container: {
     flex: 1,
     width: '100%',
-    maxWidth: 402,
+    maxWidth: Platform.OS === 'web' ? 402 : undefined,
     alignSelf: 'center',
     alignItems: 'center',
     backgroundColor: '#171717',
@@ -134,24 +139,35 @@ const baseStyles = StyleSheet.create({
     elevation: 3,
   },
   signUpButton: {
-    backgroundColor: '#332416',
+    backgroundColor: '#F28C28',
+    borderColor: '#F28C28',
   },
   logInButton: {
-    backgroundColor: '#222222',
+    backgroundColor: '#171717',
+    borderColor: '#F28C28',
   },
   signUpText: {
-    color: '#F3F0EB',
+    color: '#5D2707',
     fontSize: 20,
+    fontWeight: '600',
   },
   logInText: {
     color: '#F28C28',
     fontSize: 20,
+    fontWeight: '600',
   },
-  pressedButton: {
-    backgroundColor: '#F28C28',
+  pressedSignUpButton: {
+    backgroundColor: '#D96B0B',
+    borderColor: '#D96B0B',
   },
-  pressedButtonText: {
-    color: '#171717',
+  pressedSignUpText: {
+    color: '#3B1804',
+  },
+  pressedLogInButton: {
+    backgroundColor: 'rgba(242, 140, 40, 0.15)',
+  },
+  pressedLogInText: {
+    color: '#FFAA45',
   },
   legalText: {
     position: 'absolute',

@@ -120,6 +120,8 @@ function getAuthErrorMessage(error: { code?: string; message: string }, isSignup
 
 export function AuthScreen({ mode }: AuthScreenProps) {
   const styles = useThemedStyles(baseStyles);
+  const { mode: themeMode } = useAppTheme();
+  const isDark = themeMode === 'dark';
   const isSignup = mode === 'signup';
   const [hasSubmitted, setHasSubmitted] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -237,17 +239,17 @@ export function AuthScreen({ mode }: AuthScreenProps) {
     <View style={styles.backdrop}>
       <BlurView
         blurTarget={welcomeBlurTarget}
-        intensity={55}
+        intensity={Platform.OS === 'android' ? 35 : 45}
         pointerEvents="none"
         style={StyleSheet.absoluteFill}
-        tint="dark"
+        tint={isDark ? 'dark' : 'light'}
         blurMethod={Platform.OS === 'android' ? 'dimezisBlurView' : undefined}
       />
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Close dialog"
         onPress={dismiss}
-        style={styles.dismissOverlay}
+        style={[styles.dismissOverlay, isDark && styles.darkDismissOverlay]}
       />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -369,7 +371,10 @@ const baseStyles = StyleSheet.create({
   },
   dismissOverlay: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(0, 0, 0, 0.38)',
+    backgroundColor: 'rgba(255, 255, 255, 0.35)',
+  },
+  darkDismissOverlay: {
+    backgroundColor: 'rgba(0, 0, 0, 0.40)',
   },
   cardPositioner: {
     flex: 1,

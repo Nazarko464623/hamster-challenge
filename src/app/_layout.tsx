@@ -1,5 +1,7 @@
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
+import * as SystemUI from 'expo-system-ui';
+import { useEffect } from 'react';
 
 import { AppThemeProvider, useAppTheme } from '@/components/app-theme-provider';
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
@@ -16,6 +18,11 @@ export default function RootLayout() {
 
 function RootNavigator() {
   const { mode } = useAppTheme();
+
+  useEffect(() => {
+    SystemUI.setBackgroundColorAsync(mode === 'dark' ? '#171717' : '#FFFFFF');
+  }, [mode]);
+
   return (
     <ThemeProvider
       value={
@@ -28,7 +35,12 @@ function RootNavigator() {
       }>
       <AnimatedSplashOverlay />
       <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="index" />
+        <Stack.Screen
+          name="index"
+          options={{
+            contentStyle: { backgroundColor: mode === 'dark' ? '#171717' : '#FFFFFF' },
+          }}
+        />
         <Stack.Screen name="feed" />
         <Stack.Screen name="create" />
         <Stack.Screen

@@ -21,11 +21,25 @@ import {
   Text,
   TextInput,
   View,
+  type ImageStyle,
+  type StyleProp,
+  type ViewStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path } from 'react-native-svg';
 
 import { PlayerSettings } from '@/components/player-settings';
+import {
+  clearPlayerAvatar,
+  getPlayerAvatar,
+  getPlayerAvatarState,
+  getPlayerTags,
+  isUsableAvatarUri,
+  persistPickedAvatar,
+  savePlayerAvatar,
+  savePlayerTags,
+  syncAvatarWithAuthUser,
+} from '@/lib/player-settings';
 import { themeColor, useAppTheme, useThemedStyles } from '@/components/app-theme-provider';
 import {
   BATTLE_STATUS_LABELS,
@@ -160,6 +174,11 @@ export default function FeedScreen() {
   const [debugEndedBattleIds, setDebugEndedBattleIds] = useState<string[]>([]);
   const [showSettings, setShowSettings] = useState(false);
   const [savedDisplayName, setSavedDisplayName] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [userTags, setUserTags] = useState<string>('');
+  const [userAvatar, setUserAvatar] = useState<string | null>(null);
+  const avatarMutationVersionRef = useRef(0);
+  const checkedPendingPickerRef = useRef(false);
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { nickname } = useLocalSearchParams<{ nickname?: string }>();
@@ -169,6 +188,112 @@ export default function FeedScreen() {
 
   useEffect(() => {
     let active = true;
+    const startAvatarVersion = avatarMutationVersionRef.current;
+
+    const loadUserState = async () => {
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const sessionUser = sessionData.session?.user ?? null;
+
+        let resolvedName = displayName;
+        const hasUrlNickname = typeof nickname === 'string' && nickname.trim().length > 0;
+        if (sessionUser && !savedDisplayName && !hasUrlNickname) {
+          const metaNickname = sessionUser.user_metadata?.nickname;
+          const fallbackName =
+            typeof metaNickname === 'string' && metaNickname.trim()
+              ? metaNickname.trim()
+              : sessionUser.email?.split('@')[0]?.trim();
+          if (fallbackName && fallbackName !== 'Player') {
+            resolvedName = fallbackName;
+            if (active) {
+              setSavedDisplayName(fallbackName);
+            }
+          }
+        }
+
+        if (active && sessionUser?.id) {
+          setCurrentUserId(sessionUser.id);
+        }
+
+        const [savedTags, localAvatarState] = await Promise.all([
+          getPlayerTags(resolvedName),
+          getPlayerAvatarState(resolvedName, sessionUser?.id),
+        ]);
+
+        if (!active) {
+          return;
+        }
+
+        if (savedTags) {
+          setUserTags(savedTags);
+        }
+
+        if (avatarMutationVersionRef.current === startAvatarVersion) {
+          if (localAvatarState?.cleared) {
+            setUserAvatar(null);
+          } else if (localAvatarState?.uri) {
+            setUserAvatar(localAvatarState.uri);
+          } else {
+            const sessionAvatar = sessionUser?.user_metadata?.avatar_url;
+            if (isUsableAvatarUri(sessionAvatar)) {
+              setUserAvatar(sessionAvatar);
+              void savePlayerAvatar(sessionAvatar, resolvedName, sessionUser?.id);
+            }
+          }
+        }
+
+        const { data: userData } = await supabase.auth.getUser();
+        const user = userData.user ?? sessionUser;
+
+        if (!active) {
+          return;
+        }
+
+        if (Platform.OS === 'android' && !checkedPendingPickerRef.current) {
+          checkedPendingPickerRef.current = true;
+          const pending = await ImagePicker.getPendingResultAsync();
+          if (pending && 'canceled' in pending && !pending.canceled && pending.assets?.[0]?.uri) {
+            avatarMutationVersionRef.current += 1;
+            const pendingVersion = avatarMutationVersionRef.current;
+            const pendingAsset = pending.assets[0];
+            if (active) {
+              setUserAvatar(pendingAsset.uri);
+            }
+            const persisted = await persistPickedAvatar(pendingAsset, resolvedName, user?.id);
+            if (active && avatarMutationVersionRef.current === pendingVersion && persisted) {
+              setUserAvatar(persisted);
+            }
+            return;
+          }
+        }
+
+        if (!user) {
+          return;
+        }
+
+        setCurrentUserId(user.id);
+        const meta = user.user_metadata;
+
+        if (typeof meta?.profile_tags === 'string' && meta.profile_tags) {
+          setUserTags(meta.profile_tags);
+          void savePlayerTags(meta.profile_tags, resolvedName);
+        }
+
+        if (avatarMutationVersionRef.current !== startAvatarVersion) {
+          return;
+        }
+
+        const syncedAvatar = await syncAvatarWithAuthUser(user, resolvedName);
+        if (active && avatarMutationVersionRef.current === startAvatarVersion) {
+          setUserAvatar(syncedAvatar);
+        }
+      } catch (err) {
+        console.warn('Could not load player profile state:', err);
+      }
+    };
+
+    void loadUserState();
+
     getMineData(displayName).then((data) => {
       if (active) {
         setPinnedBattleIds(data.pinnedIds);
@@ -183,7 +308,49 @@ export default function FeedScreen() {
     return () => {
       active = false;
     };
-  }, [displayName]);
+  }, [displayName, nickname, savedDisplayName]);
+
+  const handlePickAvatar = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.75,
+      base64: true,
+    });
+
+    if (!result.canceled && result.assets?.[0]?.uri) {
+      const asset = result.assets[0];
+      avatarMutationVersionRef.current += 1;
+      const mutationVersion = avatarMutationVersionRef.current;
+
+      setUserAvatar(asset.uri);
+
+      try {
+        const persistedUri = await persistPickedAvatar(asset, displayName, currentUserId);
+        if (avatarMutationVersionRef.current === mutationVersion && persistedUri) {
+          setUserAvatar(persistedUri);
+        }
+      } catch (err) {
+        console.warn('Could not persist selected avatar:', err);
+      }
+    }
+  };
+
+  const handleRemoveAvatar = async () => {
+    avatarMutationVersionRef.current += 1;
+    setUserAvatar(null);
+    try {
+      await clearPlayerAvatar(displayName, currentUserId);
+    } catch (err) {
+      console.warn('Could not clear avatar:', err);
+    }
+  };
 
   const handleTabPress = (tabId: FeedTabId) => {
     if (tabId === 'create') {
@@ -216,18 +383,27 @@ export default function FeedScreen() {
       <StatusBar hidden />
 
       {activeTab === 'challenges' ? (
-        <LeaderboardContent displayName={displayName} />
+        <LeaderboardContent displayName={displayName} userAvatar={userAvatar} />
       ) : activeTab === 'messages' ? (
-        <ChatContent />
+        <ChatContent displayName={displayName} userAvatar={userAvatar} />
       ) : activeTab === 'profile' ? (
         showSettings ? (
           <PlayerSettings
             displayName={displayName}
+            initialTags={userTags}
             onClose={() => setShowSettings(false)}
             onNameSaved={setSavedDisplayName}
+            onTagsSaved={setUserTags}
           />
         ) : (
-          <ProfileContent displayName={displayName} onOpenSettings={() => setShowSettings(true)} />
+          <ProfileContent
+            displayName={displayName}
+            tags={userTags}
+            userAvatar={userAvatar}
+            onPickAvatar={handlePickAvatar}
+            onRemoveAvatar={handleRemoveAvatar}
+            onOpenSettings={() => setShowSettings(true)}
+          />
         )
       ) : (
         <HomeContent
@@ -246,6 +422,8 @@ export default function FeedScreen() {
             );
             await setBattlePinned(displayName, battleId, pinned);
           }}
+          displayName={displayName}
+          userAvatar={userAvatar}
         />
       )}
 
@@ -328,7 +506,81 @@ function dedupeBattles(battles: UserBattle[]) {
   return [...new Map(battles.map((battle) => [battle.id, battle])).values()];
 }
 
-function LeaderboardContent({ displayName }: { displayName: string }) {
+function UserAvatar({
+  name,
+  uri,
+  size = 40,
+  style,
+}: {
+  name: string;
+  uri?: string | null;
+  size?: number;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const { mode } = useAppTheme();
+  const [failedUri, setFailedUri] = useState<string | null>(null);
+  const initial = (name.trim()[0] || 'P').toUpperCase();
+  const fontSize = Math.round(size * 0.44);
+  const loadFailed = Boolean(uri && failedUri === uri);
+
+  if (uri && !loadFailed) {
+    return (
+      <Image
+        key={uri}
+        source={{ uri }}
+        contentFit="cover"
+        onError={() => setFailedUri(uri)}
+        accessibilityLabel={`${name} avatar`}
+        style={[
+          {
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+            backgroundColor: mode === 'light' ? '#E8F3FA' : '#202020',
+          },
+          style as StyleProp<ImageStyle>,
+        ]}
+      />
+    );
+  }
+
+  const backgroundColor = mode === 'light' ? '#208AEF' : '#F28C28';
+  const textColor = mode === 'light' ? '#FFFFFF' : '#1E1E1E';
+
+  return (
+    <View
+      style={[
+        {
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          backgroundColor,
+          alignItems: 'center',
+          justifyContent: 'center',
+        },
+        style,
+      ]}>
+      <Text
+        style={{
+          color: textColor,
+          fontSize,
+          fontWeight: '800',
+          textAlign: 'center',
+          includeFontPadding: false,
+        }}>
+        {initial}
+      </Text>
+    </View>
+  );
+}
+
+function LeaderboardContent({
+  displayName,
+  userAvatar,
+}: {
+  displayName: string;
+  userAvatar?: string | null;
+}) {
   const styles = useThemedStyles(baseStyles);
   const { mode } = useAppTheme();
   const [period, setPeriod] = useState<'week' | 'all-time'>('week');
@@ -415,6 +667,7 @@ function LeaderboardContent({ displayName }: { displayName: string }) {
         <View style={styles.rankNumber}>
           <Text style={styles.rankNumberText}>#12</Text>
         </View>
+        <UserAvatar name={displayName} uri={userAvatar} size={38} style={{ marginRight: 10 }} />
         <View style={styles.rankPlayer}>
           <Text style={styles.rankPlayerName} numberOfLines={1}>
             {displayName} <Text style={styles.youLabel}>· You</Text>
@@ -452,6 +705,8 @@ function HomeContent({
   onJoinBattle,
   debugEndedBattleIds,
   onEndBattle,
+  displayName,
+  userAvatar,
 }: {
   topInset: number;
   status: BattleStatus;
@@ -463,6 +718,8 @@ function HomeContent({
   onJoinBattle: (battleId: string, artworkUri: string) => Promise<string>;
   debugEndedBattleIds: string[];
   onEndBattle: (battleId: string) => void;
+  displayName: string;
+  userAvatar?: string | null;
 }) {
   const styles = useThemedStyles(baseStyles);
   const [selectedCategory, setSelectedCategory] = useState<BattleCategory>('All');
@@ -537,7 +794,10 @@ function HomeContent({
       ]}
       showsVerticalScrollIndicator={false}>
       <View style={styles.battlesHeader}>
-        <Text style={styles.battlesTitle}>Battles</Text>
+        <View style={styles.battlesHeaderTitleRow}>
+          <UserAvatar name={displayName} uri={userAvatar} size={36} />
+          <Text style={styles.battlesTitle}>Battles</Text>
+        </View>
         <View style={styles.battleStreakBadge}>
           <Text style={styles.battleStreakText}>🔥 4-day streak</Text>
         </View>
@@ -617,18 +877,29 @@ function HomeContent({
 
       {status === 'live' && visibleLiveBattles.map((battle) => {
         const stage = getCardStage(battle, now);
+        const battleOwner = ('owner' in battle && typeof battle.owner === 'string' && battle.owner) ? battle.owner : 'Player';
         return (
         <View key={battle.id} style={styles.battleCard}>
           <PinButton
             pinned={pinnedBattleIds.includes(battle.id)}
             onPress={() => onTogglePin(battle.id, !pinnedBattleIds.includes(battle.id))}
           />
-          <View style={styles.battleTagRow}>
-            <View style={styles.battleCategory}>
-              <Text style={styles.battleCategoryIcon}>{battle.icon}</Text>
-              <Text style={styles.battleCategoryText}>{battle.category}</Text>
+          <View style={styles.battleHeaderRow}>
+            <View style={styles.battleTagRow}>
+              <View style={styles.battleCategory}>
+                <Text style={styles.battleCategoryIcon}>{battle.icon}</Text>
+                <Text style={styles.battleCategoryText}>{battle.category}</Text>
+              </View>
+              <BattleStageBadge stage={stage} />
             </View>
-            <BattleStageBadge stage={stage} />
+            <View style={styles.battleCreatorBadge}>
+              <UserAvatar
+                name={battleOwner}
+                uri={battleOwner === displayName ? userAvatar : undefined}
+                size={22}
+              />
+              <Text style={styles.battleCreatorText}>{battleOwner}</Text>
+            </View>
           </View>
           <Text style={styles.battleTitle}>{battle.title}</Text>
            {'artworkUrl' in battle && battle.artworkUrl && (
@@ -669,6 +940,8 @@ function HomeContent({
           <EndedGameCard
             key={game.id}
             game={game}
+            displayName={displayName}
+            userAvatar={userAvatar}
             pinned={pinnedBattleIds.includes(game.id)}
             onTogglePin={onTogglePin}
           />
@@ -681,7 +954,13 @@ function HomeContent({
         </View>
       ))}
       {status === 'ended' && userEndedBattles.map((battle) => (
-        <CreatedBattleCard key={battle.id} battle={battle} onTogglePin={onTogglePin} />
+        <CreatedBattleCard
+          key={battle.id}
+          battle={battle}
+          displayName={displayName}
+          userAvatar={userAvatar}
+          onTogglePin={onTogglePin}
+        />
       ))}
       {status === 'mine' && mineBattlesCount === 0 && (
         <View style={styles.emptyMineCard}>
@@ -708,12 +987,20 @@ function HomeContent({
         <EndedGameCard
           key={game.id}
           game={game}
+          displayName={displayName}
+          userAvatar={userAvatar}
           pinned
           onTogglePin={onTogglePin}
         />
       ))}
       {status === 'mine' && createdBattles.map((battle) => (
-        <CreatedBattleCard key={battle.id} battle={battle} onTogglePin={onTogglePin} />
+        <CreatedBattleCard
+          key={battle.id}
+          battle={battle}
+          displayName={displayName}
+          userAvatar={userAvatar}
+          onTogglePin={onTogglePin}
+        />
       ))}
       </ScrollView>
 
@@ -764,10 +1051,14 @@ function HomeContent({
 function EndedGameCard({
   game,
   pinned,
+  displayName,
+  userAvatar,
   onTogglePin,
 }: {
   game: (typeof endedGames)[number];
   pinned: boolean;
+  displayName: string;
+  userAvatar?: string | null;
   onTogglePin: (battleId: string, pinned: boolean) => void;
 }) {
   const styles = useThemedStyles(baseStyles);
@@ -778,11 +1069,11 @@ function EndedGameCard({
     <View style={styles.endedGameCard}>
       <PinButton pinned={pinned} onPress={() => onTogglePin(game.id, !pinned)} />
       <View style={styles.endedAuthorRow}>
-        <View style={styles.endedAvatar}>
-          <Text style={styles.endedAvatarText}>
-            {game.author.slice(0, 2).toUpperCase()}
-          </Text>
-        </View>
+        <UserAvatar
+          name={game.author}
+          uri={game.author === displayName ? userAvatar : undefined}
+          size={38}
+        />
         <View style={styles.endedAuthorDetails}>
           <Text style={styles.endedAuthorName}>{game.author}</Text>
           <Text style={styles.endedTime}>{game.time}</Text>
@@ -833,9 +1124,13 @@ function EndedGameCard({
 
 function CreatedBattleCard({
   battle,
+  displayName,
+  userAvatar,
   onTogglePin,
 }: {
   battle: UserBattle;
+  displayName: string;
+  userAvatar?: string | null;
   onTogglePin: (battleId: string, pinned: boolean) => void;
 }) {
   const styles = useThemedStyles(baseStyles);
@@ -850,7 +1145,10 @@ function CreatedBattleCard({
       {battle.artworkUrl && (
         <Image accessibilityLabel={`${battle.title} artwork`} source={{ uri: battle.artworkUrl }} style={styles.battleArtwork} />
       )}
-      <Text style={styles.createdByText}>Created by you · {battle.time}</Text>
+      <View style={styles.battleCreatorRow}>
+        <UserAvatar name={battle.owner || displayName} uri={userAvatar} size={28} />
+        <Text style={styles.createdByText}>Created by you · {battle.time}</Text>
+      </View>
       <View style={styles.battleStageRow}>
         <BattleStageBadge stage={getBattleStatus(battle)} />
         <Text style={styles.battleMetaText}>{describeBattleStatus(battle)}</Text>
@@ -902,9 +1200,17 @@ function PeriodButton({
   );
 }
 
-function ChatContent() {
+function ChatContent({
+  displayName,
+  userAvatar,
+}: {
+  displayName: string;
+  userAvatar?: string | null;
+}) {
   const styles = useThemedStyles(baseStyles);
   const { mode } = useAppTheme();
+  const activeAvatar = userAvatar ?? null;
+  const [contactAvatars, setContactAvatars] = useState<Record<string, string | null>>({});
   const [filter, setFilter] = useState<'all' | 'unread'>('all');
   const [userId, setUserId] = useState<string | null>(null);
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
@@ -919,6 +1225,24 @@ function ChatContent() {
   const [chatError, setChatError] = useState('');
   const selectedChatIdRef = useRef<string | null>(null);
   const messageListRef = useRef<ComponentRef<typeof ScrollView>>(null);
+
+  useEffect(() => {
+    let active = true;
+    contacts.forEach((contact) => {
+      getPlayerAvatar(contact.name, contact.id).then((avatar) => {
+        if (active && avatar) {
+          setContactAvatars((prev) => ({
+            ...prev,
+            [contact.name]: avatar,
+            [contact.id]: avatar,
+          }));
+        }
+      });
+    });
+    return () => {
+      active = false;
+    };
+  }, [contacts]);
 
   useEffect(() => {
     selectedChatIdRef.current = selectedChatId;
@@ -1064,29 +1388,34 @@ function ChatContent() {
           keyboardVerticalOffset={0}
           style={styles.chatKeyboard}>
           <View style={styles.chatHeader}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Back to messages"
-              onPress={() => {
-                selectedChatIdRef.current = null;
-                setLoadingMessages(false);
-                setSelectedChatId(null);
-                setMessages([]);
-              }}
-              style={styles.chatBackButton}>
-              <Text style={styles.chatBackArrow}>‹</Text>
-            </Pressable>
-            <View
-              style={[
-                styles.chatAvatar,
-                { backgroundColor: colorForName(conversationName, mode) },
-              ]}>
-              <Text style={styles.chatAvatarText}>{conversationName.slice(0, 1).toUpperCase()}</Text>
+            <View style={styles.chatHeaderLeft}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Back to messages"
+                onPress={() => {
+                  selectedChatIdRef.current = null;
+                  setLoadingMessages(false);
+                  setSelectedChatId(null);
+                  setMessages([]);
+                }}
+                style={styles.chatBackButton}>
+                <Text style={styles.chatBackArrow}>‹</Text>
+              </Pressable>
+              <UserAvatar
+                name={conversationName}
+                uri={
+                  contactAvatars[conversationName] ??
+                  (selectedConversation ? contactAvatars[selectedConversation.id] : undefined) ??
+                  (conversationName.toLowerCase() === displayName.toLowerCase() ? activeAvatar : undefined)
+                }
+                size={40}
+              />
+              <View style={styles.chatHeaderInfo}>
+                <Text style={styles.chatHeaderName}>{conversationName}</Text>
+                <Text style={styles.chatOnline}>Direct messages</Text>
+              </View>
             </View>
-            <View style={styles.chatHeaderInfo}>
-              <Text style={styles.chatHeaderName}>{conversationName}</Text>
-              <Text style={styles.chatOnline}>Direct messages</Text>
-            </View>
+            <UserAvatar name={displayName} uri={activeAvatar} size={36} />
           </View>
 
           <ScrollView
@@ -1100,7 +1429,7 @@ function ChatContent() {
               <Text style={styles.chatStatus}>Send a message to start the conversation.</Text>
             ) : null}
             {messages.map((message) => {
-              const outgoing = message.senderId === userId;
+              const outgoing = Boolean(userId && message.senderId === userId);
               return (
                 <View
                   key={message.id}
@@ -1108,6 +1437,18 @@ function ChatContent() {
                     styles.messageLine,
                     outgoing ? styles.outgoingMessageLine : styles.incomingMessageLine,
                   ]}>
+                  {!outgoing ? (
+                    <UserAvatar
+                      name={conversationName}
+                      uri={
+                        contactAvatars[conversationName] ??
+                        contactAvatars[message.senderId] ??
+                        (conversationName.toLowerCase() === displayName.toLowerCase() ? activeAvatar : undefined)
+                      }
+                      size={28}
+                      style={{ marginRight: 8, alignSelf: 'flex-end', marginBottom: 2 }}
+                    />
+                  ) : null}
                   <View
                     style={[
                       styles.messageBubble,
@@ -1128,6 +1469,14 @@ function ChatContent() {
                       {formatChatTime(message.createdAt)}
                     </Text>
                   </View>
+                  {outgoing ? (
+                    <UserAvatar
+                      name={displayName}
+                      uri={activeAvatar}
+                      size={28}
+                      style={{ marginLeft: 8, alignSelf: 'flex-end', marginBottom: 2 }}
+                    />
+                  ) : null}
                 </View>
               );
             })}
@@ -1184,7 +1533,10 @@ function ChatContent() {
       contentContainerStyle={styles.chatListContent}
       showsVerticalScrollIndicator={false}>
       <View style={styles.pageHeading}>
-        <Text style={styles.pageTitle}>Messages</Text>
+        <View style={styles.chatHeaderTopRow}>
+          <Text style={styles.pageTitle}>Messages</Text>
+          <UserAvatar name={displayName} uri={activeAvatar} size={38} />
+        </View>
         <Text style={styles.pageSubtitle}>Keep the conversation going</Text>
       </View>
 
@@ -1257,13 +1609,15 @@ function ChatContent() {
                 setSelectedChatId(conversation.id);
               }}
               style={styles.conversationRow}>
-              <View
-                style={[
-                  styles.chatAvatar,
-                  { backgroundColor: colorForName(conversation.name, mode) },
-                ]}>
-                <Text style={styles.chatAvatarText}>{conversation.name.slice(0, 1).toUpperCase()}</Text>
-              </View>
+              <UserAvatar
+                name={conversation.name}
+                uri={
+                  contactAvatars[conversation.name] ??
+                  contactAvatars[conversation.id] ??
+                  (conversation.name.toLowerCase() === displayName.toLowerCase() ? activeAvatar : undefined)
+                }
+                size={50}
+              />
               <View style={styles.conversationInfo}>
                 <View style={styles.conversationTopline}>
                   <Text style={styles.conversationName}>{conversation.name}</Text>
@@ -1321,68 +1675,182 @@ function formatInboxTime(timestamp: string) {
 
 function LineIcon({ type, active }: { type: Exclude<FeedTabId, 'create'>; active: boolean }) {
   const { mode } = useAppTheme();
-  const color = themeColor(active ? '#F28C28' : '#A3A3A3', mode);
-  const fill = themeColor(active ? '#FFE6C7' : '#E5E5E5', mode, 'fill');
+  const activeStroke = themeColor('#F28C28', mode);
+  const activeFill = themeColor('#FFE6C7', mode, 'fill');
+  const inactiveStroke = themeColor('#9F9F9F', mode);
+  const bgColor = themeColor('#171717', mode, 'fill');
+  const strokeWidth = 3;
 
   if (type === 'challenges') {
+    if (active) {
+      return (
+        <Svg width={36} height={36} viewBox="129 38 38 38">
+          <Path
+            d="M138.5 39.3569V54.2855C138.5 56.8051 139.501 59.2214 141.282 61.003C143.064 62.7846 145.48 63.7855 148 63.7855C150.52 63.7855 152.936 62.7846 154.718 61.003C156.499 59.2214 157.5 56.8051 157.5 54.2855V39.3569H138.5Z"
+            fill={activeFill}
+          />
+          <Path
+            d="M148 63.7855V74.6426M148 74.6426H138.5M148 74.6426H157.5M138.5 39.3569H130.357V47.4998C130.357 49.6594 131.215 51.7306 132.742 53.2577C134.269 54.7847 136.341 55.6426 138.5 55.6426V39.3569ZM157.5 39.3569H165.643V47.4998C165.643 49.6594 164.785 51.7306 163.258 53.2577C161.731 54.7847 159.66 55.6426 157.5 55.6426V39.3569Z"
+            fill="none"
+            stroke={activeStroke}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={3}
+          />
+          <Path
+            d="M138.5 39.3569V54.2855C138.5 56.8051 139.501 59.2214 141.282 61.003C143.064 62.7846 145.48 63.7855 148 63.7855C150.52 63.7855 152.936 62.7846 154.718 61.003C156.499 59.2214 157.5 56.8051 157.5 54.2855V39.3569H138.5Z"
+            fill="none"
+            stroke={activeStroke}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={3}
+          />
+        </Svg>
+      );
+    }
     return (
-      <Svg width={40} height={40} viewBox="0 0 48 48">
+      <Svg width={36} height={36} viewBox="38.5 37.5 38 38">
         <Path
-          d="M12 7h24v11c0 8.3-5.4 14-12 14s-12-5.7-12-14V7Z"
-          fill={fill}
-          stroke={color}
-          strokeLinejoin="round"
-          strokeWidth={3.5}
-        />
-        <Path
-          d="M12 12H6v5c0 5 3.5 8 9 8M36 12h6v5c0 5-3.5 8-9 8M24 32v7m-8 2h16"
+          d="M57.5004 61.6785V69.9642M57.5004 69.9642H50.2504M57.5004 69.9642H64.7504M50.2504 43.0356H44.0361V49.2499C44.0361 50.8981 44.6909 52.4787 45.8563 53.6441C47.0217 54.8095 48.6023 55.4642 50.2504 55.4642V43.0356ZM64.7504 43.0356H70.9647V49.2499C70.9647 50.8981 70.31 52.4787 69.1446 53.6441C67.9792 54.8095 66.3985 55.4642 64.7504 55.4642V43.0356Z"
           fill="none"
-          stroke={color}
+          stroke={inactiveStroke}
           strokeLinecap="round"
           strokeLinejoin="round"
-          strokeWidth={3.5}
+          strokeWidth={3}
+        />
+        <Path
+          d="M50.25 43.0356V54.4285C50.25 56.3513 51.0138 58.1954 52.3735 59.555C53.7331 60.9147 55.5772 61.6785 57.5 61.6785C59.4228 61.6785 61.2669 60.9147 62.6265 59.555C63.9862 58.1954 64.75 56.3513 64.75 54.4285V43.0356H50.25Z"
+          fill="none"
+          stroke={inactiveStroke}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={3}
         />
       </Svg>
     );
   }
 
   if (type === 'home') {
+    if (active) {
+      return (
+        <Svg width={36} height={36} viewBox="133.5 36.5 38 38">
+          <Path
+            d="M135.553 55.4813V60.2151C135.553 66.4388 135.553 69.5506 137.486 71.4837C139.419 73.4168 142.531 73.4168 148.754 73.4168H156.298C162.522 73.4168 165.634 73.4168 167.567 71.4837C169.5 69.5506 169.5 66.4388 169.5 60.2151V55.4813C169.5 52.3091 169.5 50.7249 168.829 49.3519C168.157 47.9789 166.905 47.0058 164.404 45.0595L160.632 42.1268C156.738 39.0979 154.79 37.5835 152.526 37.5835C150.263 37.5835 148.315 39.0979 144.421 42.1268L140.649 45.0595C138.146 47.0058 136.896 47.9789 136.224 49.3519C135.553 50.7249 135.553 52.3091 135.553 55.4813Z"
+            fill={activeFill}
+            stroke={activeStroke}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={strokeWidth}
+          />
+          <Path
+            d="M147.138 64.3911V71.6656H157.915V64.3911L154.682 61.9663H150.371L147.138 64.3911Z"
+            fill={bgColor}
+          />
+          <Path
+            d="M147.812 72.0697V65.4688C147.812 64.0638 147.812 63.3603 148.028 62.8021C148.189 62.3864 148.435 62.0089 148.75 61.6936C149.065 61.3783 149.442 61.1321 149.858 60.9708C150.418 60.7539 151.121 60.7539 152.526 60.7539C153.931 60.7539 154.635 60.7539 155.193 60.9708C155.609 61.1317 155.986 61.3775 156.302 61.6925C156.617 62.0074 156.863 62.3847 157.024 62.8002C157.241 63.3603 157.241 64.0638 157.241 65.4688V72.0697"
+            fill="none"
+            stroke={activeStroke}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={strokeWidth}
+          />
+        </Svg>
+      );
+    }
     return (
-      <Svg width={40} height={40} viewBox="0 0 48 48">
+      <Svg width={36} height={36} viewBox="38.5 36.5 38 38">
         <Path
-          d="m5.5 21.5 15.1-13.4a5 5 0 0 1 6.8 0l15.1 13.4v13a5 5 0 0 1-5 5h-27a5 5 0 0 1-5-5v-13Z"
-          fill={fill}
-          stroke={color}
+          d="M43.0527 55.4839V59.5204C43.0527 64.8274 43.0527 67.4809 44.7011 69.1293C46.3495 70.7777 49.003 70.7777 54.31 70.7777H60.7428C66.0498 70.7777 68.7033 70.7777 70.3517 69.1293C72.0001 67.4809 72.0001 64.8274 72.0001 59.5204V55.4839C72.0001 52.7789 72.0001 51.428 71.4276 50.2573C70.8551 49.0865 69.7872 48.2567 67.6548 46.597L64.4384 44.0963C61.1175 41.5135 59.4562 40.2222 57.5264 40.2222C55.5966 40.2222 53.9353 41.5135 50.6144 44.0963L47.3981 46.597C45.264 48.2567 44.1978 49.0865 43.6252 50.2573C43.0527 51.428 43.0527 52.7789 43.0527 55.4839Z"
+          fill="none"
+          stroke={inactiveStroke}
+          strokeLinecap="round"
           strokeLinejoin="round"
-          strokeWidth={3.5}
+          strokeWidth={3}
         />
         <Path
-          d="M18 39V28a6 6 0 0 1 12 0v11"
-          fill={themeColor('#171717', mode, 'fill')}
-          stroke={color}
+          d="M53.5059 69.6291V64.0004C53.5059 62.8023 53.5059 62.2025 53.6908 61.7265C53.828 61.3721 54.0376 61.0501 54.3062 60.7813C54.5748 60.5124 54.8965 60.3025 55.2507 60.1649C55.7284 59.98 56.3282 59.98 57.5263 59.98C58.7244 59.98 59.3243 59.98 59.8003 60.1649C60.1547 60.3021 60.4766 60.5117 60.7455 60.7803C61.0144 61.0489 61.2243 61.3706 61.3619 61.7249C61.5468 62.2025 61.5468 62.8023 61.5468 64.0004V69.6291"
+          fill="none"
+          stroke={inactiveStroke}
+          strokeLinecap="round"
           strokeLinejoin="round"
-          strokeWidth={3.5}
+          strokeWidth={3}
         />
       </Svg>
     );
   }
 
   if (type === 'messages') {
+    if (active) {
+      return (
+        <Svg width={36} height={36} viewBox="125 38 38 38">
+          <Path
+            d="M143.995 39.52C140.833 39.5213 137.731 40.38 135.019 42.0046C132.307 43.6293 130.086 45.9591 128.593 48.746C127.1 51.5329 126.391 54.6725 126.541 57.8305C126.692 60.9884 127.695 64.0466 129.446 66.6792L126.515 74.48L136.332 72.7076C138.696 73.8617 141.289 74.4675 143.92 74.4798C146.55 74.4922 149.149 73.9108 151.524 72.7789C153.898 71.647 155.986 69.9939 157.633 67.9428C159.28 65.8916 160.442 63.4953 161.034 60.9324C161.625 58.3695 161.631 55.7061 161.05 53.1407C160.47 50.5752 159.317 48.174 157.68 46.1158C156.042 44.0576 153.961 42.3955 151.591 41.2535C149.222 40.1115 146.625 39.5189 143.995 39.52Z"
+            fill={activeFill}
+          />
+          <Path
+            d="M143.995 39.52C140.833 39.5213 137.731 40.38 135.019 42.0046C132.307 43.6293 130.086 45.9591 128.593 48.746C127.1 51.5329 126.391 54.6725 126.541 57.8305C126.692 60.9884 127.695 64.0466 129.446 66.6792L126.515 74.48L136.332 72.7076C139.029 74.0252 142.02 74.6261 145.017 74.4524C148.014 74.2786 150.915 73.3361 153.442 71.7156C155.969 70.0951 158.035 67.8513 159.443 65.2002C160.851 62.5491 161.553 59.5802 161.48 56.5793"
+            fill="none"
+            stroke={activeStroke}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={3}
+          />
+          <Path
+            d="M154.857 52.9284C156.657 52.9284 158.383 52.2134 159.655 50.9409C160.928 49.6683 161.643 47.9423 161.643 46.1426C161.643 44.343 160.928 42.617 159.655 41.3444C158.383 40.0719 156.657 39.3569 154.857 39.3569C153.057 39.3569 151.331 40.0719 150.059 41.3444C148.786 42.617 148.071 44.343 148.071 46.1426C148.071 47.9423 148.786 49.6683 150.059 50.9409C151.331 52.2134 153.057 52.9284 154.857 52.9284Z"
+            fill={bgColor}
+            stroke={activeStroke}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={3}
+          />
+        </Svg>
+      );
+    }
     return (
-      <Svg width={40} height={40} viewBox="0 0 48 48">
+      <Svg width={36} height={36} viewBox="36.5 38.5 38 38">
         <Path
-          d="M8 11a7 7 0 0 1 7-7h16a7 7 0 0 1 7 7v12a7 7 0 0 1-7 7H20l-9 7 2-9a7 7 0 0 1-5-6V11Z"
-          fill={fill}
-          stroke={color}
+          d="M55.3749 44.1245C52.9558 44.1255 50.5823 44.7825 48.5071 46.0256C46.4319 47.2688 44.7326 49.0514 43.5904 51.1838C42.4481 53.3162 41.9055 55.7185 42.0205 58.1348C42.1354 60.5512 42.9035 62.8911 44.243 64.9054L42 70.8743L49.512 69.5181C51.5756 70.5263 53.8642 70.9861 56.1571 70.8531C58.45 70.7202 60.6701 69.999 62.6034 68.7591C64.5368 67.5192 66.1182 65.8023 67.1955 63.7738C68.2727 61.7453 68.8094 59.4736 68.7539 57.1775"
+          fill="none"
+          stroke={inactiveStroke}
+          strokeLinecap="round"
           strokeLinejoin="round"
-          strokeWidth={3.5}
+          strokeWidth={3}
         />
-        <Circle
-          cx={37}
-          cy={10}
-          r={6}
-          fill={themeColor(active ? '#3A2919' : '#171717', mode, 'fill')}
-          stroke={color}
+        <Path
+          d="M63.6863 54.3842C65.0633 54.3842 66.3839 53.8372 67.3576 52.8635C68.3314 51.8898 68.8784 50.5692 68.8784 49.1921C68.8784 47.8151 68.3314 46.4944 67.3576 45.5207C66.3839 44.547 65.0633 44 63.6863 44C62.3092 44 60.9886 44.547 60.0149 45.5207C59.0412 46.4944 58.4941 47.8151 58.4941 49.1921C58.4941 50.5692 59.0412 51.8898 60.0149 52.8635C60.9886 53.8372 62.3092 54.3842 63.6863 54.3842Z"
+          fill="none"
+          stroke={inactiveStroke}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={3}
+        />
+      </Svg>
+    );
+  }
+
+  if (active) {
+    return (
+      <Svg width={36} height={36} viewBox="152 38 38 38">
+        <Path
+          d="M159.527 70.3174C160.733 68.3362 162.429 66.6987 164.451 65.5625C166.473 64.4262 168.753 63.8294 171.073 63.8295C175.963 63.8295 180.248 66.4247 182.618 70.3174C185.315 67.9663 187.23 64.8481 188.107 61.3796C188.984 57.911 188.781 54.2575 187.526 50.9073C186.27 47.5571 184.022 44.6699 181.082 42.6317C178.141 40.5936 174.649 39.5015 171.071 39.5015C167.494 39.5015 164.001 40.5936 161.061 42.6317C158.121 44.6699 155.873 47.5571 154.617 50.9073C153.362 54.2575 153.159 57.911 154.036 61.3796C154.913 64.8481 156.828 67.9663 159.524 70.3174M171.073 59.7746C172.865 59.7746 174.584 59.0625 175.852 57.7951C177.119 56.5277 177.831 54.8087 177.831 53.0163C177.831 51.224 177.119 49.505 175.852 48.2376C174.584 46.9701 172.865 46.2581 171.073 46.2581C169.28 46.2581 167.561 46.9701 166.294 48.2376C165.027 49.505 164.315 51.224 164.315 53.0163C164.315 54.8087 165.027 56.5277 166.294 57.7951C167.561 59.0625 169.28 59.7746 171.073 59.7746Z"
+          fill={activeFill}
+          clipRule="evenodd"
+          fillRule="evenodd"
+        />
+        <Path
+          d="M159.529 70.3176C160.736 68.3375 162.431 66.701 164.453 65.5654C166.474 64.4298 168.754 63.8334 171.072 63.8334C173.391 63.8334 175.671 64.4298 177.692 65.5654C179.714 66.701 181.409 68.3375 182.615 70.3176M171.072 59.7748C172.865 59.7748 174.584 59.0627 175.851 57.7953C177.119 56.5279 177.831 54.8089 177.831 53.0165C177.831 51.2241 177.119 49.5052 175.851 48.2377C174.584 46.9703 172.865 46.2583 171.072 46.2583C169.28 46.2583 167.561 46.9703 166.294 48.2377C165.026 49.5052 164.314 51.2241 164.314 53.0165C164.314 54.8089 165.026 56.5279 166.294 57.7953C167.561 59.0627 169.28 59.7748 171.072 59.7748Z"
+          fill="none"
+          stroke={activeStroke}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={3}
+        />
+        <Path
+          d="M171.072 74.6428C175.733 74.6428 180.202 72.7915 183.497 69.4962C186.792 66.201 188.644 61.7316 188.644 57.0714C188.644 52.4112 186.792 47.9418 183.497 44.6465C180.202 41.3513 175.733 39.5 171.072 39.5C166.412 39.5 161.943 41.3513 158.648 44.6465C155.352 47.9418 153.501 52.4112 153.501 57.0714C153.501 61.7316 155.352 66.201 158.648 69.4962C161.943 72.7915 166.412 74.6428 171.072 74.6428Z"
+          fill="none"
+          stroke={activeStroke}
+          strokeLinecap="round"
+          strokeLinejoin="round"
           strokeWidth={3}
         />
       </Svg>
@@ -1390,20 +1858,19 @@ function LineIcon({ type, active }: { type: Exclude<FeedTabId, 'create'>; active
   }
 
   return (
-    <Svg width={40} height={40} viewBox="0 0 48 48">
-      <Circle cx={24} cy={24} r={18} fill={fill} stroke={color} strokeWidth={3.5} />
-      <Circle
-        cx={24}
-        cy={18}
-        r={6}
-        fill={themeColor('#171717', mode, 'fill')}
-        stroke={color}
+    <Svg width={36} height={36} viewBox="38 45 38 38">
+      <Path
+        d="M47.9229 74.5708C48.879 73.0013 50.2229 71.7041 51.8252 70.804C53.4275 69.9039 55.2345 69.4311 57.0723 69.4311C58.9101 69.4311 60.7171 69.9039 62.3194 70.804C63.9217 71.7041 65.2656 73.0013 66.2218 74.5708M57.0723 66.2141C58.493 66.2141 59.8555 65.6498 60.8601 64.6452C61.8647 63.6406 62.4291 62.278 62.4291 60.8573C62.4291 59.4366 61.8647 58.0741 60.8601 57.0695C59.8555 56.0649 58.493 55.5005 57.0723 55.5005C55.6516 55.5005 54.2891 56.0649 53.2845 57.0695C52.2799 58.0741 51.7155 59.4366 51.7155 60.8573C51.7155 62.278 52.2799 63.6406 53.2845 64.6452C54.2891 65.6498 55.6516 66.2141 57.0723 66.2141Z"
+        fill="none"
+        stroke={inactiveStroke}
+        strokeLinecap="round"
+        strokeLinejoin="round"
         strokeWidth={3}
       />
       <Path
-        d="M13 37c.8-6 5-9 11-9s10.2 3 11 9"
-        fill={themeColor('#171717', mode, 'fill')}
-        stroke={color}
+        d="M57.0723 77.999C60.7661 77.999 64.3087 76.5316 66.9207 73.9197C69.5326 71.3077 71 67.7652 71 64.0713C71 60.3774 69.5326 56.8349 66.9207 54.2229C64.3087 51.6109 60.7661 50.1436 57.0723 50.1436C53.3784 50.1436 49.8358 51.6109 47.2239 54.2229C44.6119 56.8349 43.1445 60.3774 43.1445 64.0713C43.1445 67.7652 44.6119 71.3077 47.2239 73.9197C49.8358 76.5316 53.3784 77.999 57.0723 77.999Z"
+        fill="none"
+        stroke={inactiveStroke}
         strokeLinecap="round"
         strokeLinejoin="round"
         strokeWidth={3}
@@ -1412,52 +1879,99 @@ function LineIcon({ type, active }: { type: Exclude<FeedTabId, 'create'>; active
   );
 }
 
+function SettingsIcon({ color, size = 24 }: { color: string; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 30 30" fill="none">
+      <Path
+        d="M3.75 6.25H8.75M26.25 6.25H13.75M3.75 15H18.75M26.25 15H23.75M3.75 23.75H6.25M26.25 23.75H11.25"
+        stroke={color}
+        strokeWidth={2}
+        strokeLinecap="round"
+      />
+      <Path
+        d="M13.75 6.25C13.75 7.63071 12.6307 8.75 11.25 8.75C9.86929 8.75 8.75 7.63071 8.75 6.25C8.75 4.86929 9.86929 3.75 11.25 3.75C12.6307 3.75 13.75 4.86929 13.75 6.25Z"
+        stroke={color}
+        strokeWidth={2}
+        strokeLinecap="round"
+      />
+      <Path
+        d="M23.75 15C23.75 16.3807 22.6307 17.5 21.25 17.5C19.8693 17.5 18.75 16.3807 18.75 15C18.75 13.6193 19.8693 12.5 21.25 12.5C22.6307 12.5 23.75 13.6193 23.75 15Z"
+        stroke={color}
+        strokeWidth={2}
+        strokeLinecap="round"
+      />
+      <Path
+        d="M11.25 23.75C11.25 25.1307 10.1307 26.25 8.75 26.25C7.36929 26.25 6.25 25.1307 6.25 23.75C6.25 22.3693 7.36929 21.25 8.75 21.25C10.1307 21.25 11.25 22.3693 11.25 23.75Z"
+        stroke={color}
+        strokeWidth={2}
+        strokeLinecap="round"
+      />
+    </Svg>
+  );
+}
+
 function ProfileContent({
   displayName,
+  tags,
+  userAvatar,
+  onPickAvatar,
+  onRemoveAvatar,
   onOpenSettings,
 }: {
   displayName: string;
+  tags: string;
+  userAvatar?: string | null;
+  onPickAvatar: () => void;
+  onRemoveAvatar: () => void;
   onOpenSettings: () => void;
 }) {
   const styles = useThemedStyles(baseStyles);
   const { mode } = useAppTheme();
+  const [showAvatarMenu, setShowAvatarMenu] = useState(false);
+
+  const handleAvatarPress = () => {
+    if (userAvatar) {
+      setShowAvatarMenu(true);
+    } else {
+      onPickAvatar();
+    }
+  };
+
   return (
-    <ScrollView
-      style={styles.profileScroll}
-      contentContainerStyle={styles.profileContent}
-      showsVerticalScrollIndicator={false}>
-      <View style={styles.profileHeader}>
-        <View style={styles.avatarRing}>
-          <View style={styles.avatar}>
-            <SymbolView
-              accessibilityLabel="Profile photo placeholder"
-              name={{
-                ios: 'person.crop.circle.fill',
-                android: 'account_circle',
-                web: 'account_circle',
-              }}
-              size={88}
-              tintColor={themeColor('#FFF1DF', mode, 'tintColor')}
-              style={styles.avatarSymbol}
-            />
-          </View>
-        </View>
+    <>
+      <ScrollView
+        style={styles.profileScroll}
+        contentContainerStyle={styles.profileContent}
+        showsVerticalScrollIndicator={false}>
+        <View style={styles.profileHeader}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Change profile avatar"
+            onPress={handleAvatarPress}
+            style={styles.avatarPressable}>
+            <View style={styles.avatarRing}>
+              <UserAvatar name={displayName} uri={userAvatar} size={96} />
+            </View>
+            <View style={styles.avatarEditBadge}>
+              <SymbolView
+                accessibilityLabel="Change photo"
+                name={{ ios: 'camera.fill', android: 'photo_camera', web: 'photo_camera' }}
+                size={15}
+                tintColor={mode === 'light' ? '#FFFFFF' : '#171717'}
+              />
+            </View>
+          </Pressable>
         <Text style={styles.profileName} numberOfLines={1}>
           {displayName}
         </Text>
-        <Text style={styles.profileTags}>#humstbattle   #newgen</Text>
+        {tags ? <Text style={styles.profileTags}>{tags}</Text> : null}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Open settings"
           hitSlop={6}
           onPress={onOpenSettings}
           style={({ pressed }) => [styles.settingsButton, pressed && styles.settingsButtonPressed]}>
-          <SymbolView
-            name={{ ios: 'slider.horizontal.3', android: 'tune', web: 'tune' }}
-            size={22}
-            tintColor={themeColor('#C96A13', mode, 'tintColor')}
-            style={styles.settingsIcon}
-          />
+          <SettingsIcon color={themeColor('#F28C28', mode)} size={24} />
         </Pressable>
       </View>
 
@@ -1544,6 +2058,61 @@ function ProfileContent({
         </Text>
       </View>
     </ScrollView>
+
+    <Modal
+      animationType="fade"
+      transparent
+      visible={showAvatarMenu}
+      onRequestClose={() => setShowAvatarMenu(false)}>
+      <Pressable
+        style={styles.participationOverlay}
+        onPress={() => setShowAvatarMenu(false)}>
+        <Pressable style={styles.participationSheet} onPress={(e) => e.stopPropagation()}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Close photo menu"
+            onPress={() => setShowAvatarMenu(false)}
+            style={({ pressed }) => [styles.closeParticipationButton, pressed && { opacity: 0.75 }]}>
+            <Text style={styles.closeParticipationText}>×</Text>
+          </Pressable>
+          <Text style={styles.participationTitle}>Profile photo</Text>
+          <Text style={styles.participationSubtitle}>{displayName}</Text>
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Choose new photo from gallery"
+            onPress={() => {
+              setShowAvatarMenu(false);
+              onPickAvatar();
+            }}
+            style={({ pressed }) => [styles.participationAction, pressed && { opacity: 0.75 }]}>
+            <SymbolView
+              name={{ ios: 'photo.on.rectangle', android: 'photo_library', web: 'photo_library' }}
+              size={22}
+              tintColor={mode === 'light' ? '#208AEF' : '#F28C28'}
+            />
+            <Text style={styles.participationActionText}>Choose from gallery</Text>
+          </Pressable>
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Remove photo"
+            onPress={() => {
+              setShowAvatarMenu(false);
+              onRemoveAvatar();
+            }}
+            style={({ pressed }) => [styles.participationAction, pressed && { opacity: 0.75 }]}>
+            <SymbolView
+              name={{ ios: 'trash.fill', android: 'delete', web: 'delete' }}
+              size={22}
+              tintColor="#E53935"
+            />
+            <Text style={[styles.participationActionText, { color: '#E53935' }]}>Remove photo</Text>
+          </Pressable>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  </>
   );
 }
 
@@ -1615,6 +2184,11 @@ const baseStyles = StyleSheet.create({
     alignItems: 'center',
     paddingTop: 10,
   },
+  avatarPressable: {
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   avatarRing: {
     width: 112,
     height: 112,
@@ -1623,6 +2197,19 @@ const baseStyles = StyleSheet.create({
     borderRadius: 56,
     borderWidth: 5,
     borderColor: '#F28C28',
+  },
+  avatarEditBadge: {
+    position: 'absolute',
+    bottom: 2,
+    right: 2,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F28C28',
+    borderWidth: 2,
+    borderColor: '#171717',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   avatar: {
     width: 96,
@@ -1721,11 +2308,11 @@ const baseStyles = StyleSheet.create({
     textAlign: 'center',
   },
   battleTagRow: {
+    flexShrink: 1,
     flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'wrap',
     gap: 6,
-    paddingRight: 36,
   },
   battleStageRow: {
     flexDirection: 'row',
@@ -1971,6 +2558,11 @@ const baseStyles = StyleSheet.create({
   pageHeading: {
     marginBottom: 18,
   },
+  chatHeaderTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   pageTitle: {
     color: '#F3F0EB',
     fontSize: 27,
@@ -2192,6 +2784,34 @@ const baseStyles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 12,
+  },
+  battlesHeaderTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  battleHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  battleCreatorBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  battleCreatorText: {
+    color: '#AAA39A',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  battleCreatorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+    marginBottom: 4,
   },
   battlesTitle: {
     color: '#F3F0EB',
@@ -2752,9 +3372,16 @@ const baseStyles = StyleSheet.create({
     minHeight: 68,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 14,
     borderBottomWidth: 1,
     borderBottomColor: '#F2E3D0',
+  },
+  chatHeaderLeft: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 10,
   },
   chatBackButton: {
     width: 34,

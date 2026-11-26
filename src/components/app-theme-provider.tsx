@@ -33,6 +33,8 @@ const lightTextOnAccent = new Set([
   'endedVotedText',
   'sendButtonText',
   'outgoingMessageText',
+  'signUpText',
+  'pressedSignUpText',
 ]);
 
 const lightColors: Record<string, string> = {
@@ -58,6 +60,7 @@ const lightColors: Record<string, string> = {
   '#63322D': '#F0C7BD',
   '#F3F0EB': '#172B3A',
   '#F28C28': '#208AEF',
+  '#F87415': '#208AEF',
   '#F8A23A': '#3198EB',
   '#FFAA45': '#208AEF',
   '#F5A047': '#287FC1',
@@ -65,6 +68,7 @@ const lightColors: Record<string, string> = {
   '#C96A13': '#287FC1',
   '#B85F12': '#287FC1',
   '#A85208': '#175D9B',
+  '#FFD5B8': '#E4F2FB',
   '#FFE0B2': '#E4F2FB',
   '#FFE6C7': '#E4F2FB',
   '#FFE8CE': '#ECF6FC',
@@ -89,6 +93,7 @@ const lightColors: Record<string, string> = {
   '#888888': '#738999',
   '#999999': '#8194A2',
   '#969696': '#788C9B',
+  '#9F9F9F': '#8A9CAA',
   '#A8A8A8': '#8A9CAA',
 };
 
