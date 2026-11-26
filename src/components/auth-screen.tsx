@@ -1,7 +1,7 @@
 import { BlurView } from 'expo-blur';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Keyboard,
   KeyboardAvoidingView,
@@ -17,13 +17,15 @@ import {
 
 import { welcomeBlurTarget } from './auth-blur-target';
 import { themeColor, useAppTheme, useThemedStyles } from '@/components/app-theme-provider';
+import { getEmailSuggestions, hasInvalidEmailChars, isValidEmail } from '@/lib/email-domains';
+import { LEGAL_VERSION } from '@/lib/legal';
 import { supabase } from '@/lib/supabase';
 
 type AuthScreenProps = {
   mode: 'login' | 'signup';
 };
 
-type AuthField = 'nickname' | 'email' | 'password' | 'repeatedPassword';
+type AuthField = 'nickname' | 'email' | 'password' | 'repeatedPassword' | 'terms';
 type AuthErrors = Partial<Record<AuthField, string>>;
 type AuthMessage = { text: string; tone: 'error' | 'info' };
 
@@ -35,6 +37,7 @@ type AuthInputProps = {
   helperText?: string;
   onChangeText: (value: string) => void;
   value: string;
+  suggestEmails?: boolean;
 };
 
 function AuthInput({
@@ -45,16 +48,53 @@ function AuthInput({
   helperText,
   onChangeText,
   value,
+  suggestEmails,
 }: AuthInputProps) {
   const styles = useThemedStyles(baseStyles);
   const { mode } = useAppTheme();
+  const [isFocused, setIsFocused] = useState(false);
+  const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (blurTimer.current) {
+      clearTimeout(blurTimer.current);
+    }
+  }, []);
+  const suggestions = suggestEmails && isFocused ? getEmailSuggestions(value) : [];
+  const dropdownHeight = suggestions.length * SUGGESTION_ROW_HEIGHT + 8;
   return (
-    <View>
+    <View
+      // Android (new architecture) "flattens" a View that has no style of its own. When the
+      // list appeared, the wrapper got a style, Android created it on the spot and moved the
+      // input into it: the input lost focus and the cursor jumped to the nickname field.
+      // collapsable={false} and a style that is always present keep the wrapper in place.
+      collapsable={false}
+      style={[
+        suggestEmails && styles.inputWithSuggestions,
+        // When the list is open the wrapper is stretched over it (and pulled back with a
+        // negative margin so nothing below moves). On Android a tap only reaches a view
+        // that lies inside its parent's bounds.
+        suggestions.length > 0 && {
+          paddingBottom: dropdownHeight + 4,
+          marginBottom: -(dropdownHeight + 4),
+        },
+      ]}>
       <TextInput
         accessibilityLabel={placeholder}
         autoCapitalize="none"
+        autoCorrect={suggestEmails ? false : undefined}
         keyboardType={keyboardType}
+        onBlur={() => {
+          // On web the input loses focus before the click on a suggestion lands,
+          // so the list is hidden a moment later instead of immediately.
+          blurTimer.current = setTimeout(() => setIsFocused(false), 300);
+        }}
         onChangeText={onChangeText}
+        onFocus={() => {
+          if (blurTimer.current) {
+            clearTimeout(blurTimer.current);
+          }
+          setIsFocused(true);
+        }}
         placeholder={placeholder}
         placeholderTextColor={themeColor('#999999', mode)}
         returnKeyType="next"
@@ -62,6 +102,26 @@ function AuthInput({
         style={[styles.input, styles.inputText, error && styles.inputError]}
         value={value}
       />
+      {suggestions.length > 0 ? (
+        <View accessibilityRole="menu" style={[styles.suggestionList, { height: dropdownHeight }]}>
+          {suggestions.map((suggestion) => {
+            const atIndex = suggestion.indexOf('@');
+            return (
+              <Pressable
+                key={suggestion}
+                accessibilityRole="menuitem"
+                accessibilityLabel={`Use ${suggestion}`}
+                onPress={() => onChangeText(suggestion)}
+                style={({ pressed }) => [styles.suggestionItem, pressed && styles.suggestionPressed]}>
+                <Text numberOfLines={1} style={styles.suggestionText}>
+                  {suggestion.slice(0, atIndex + 1)}
+                  <Text style={styles.suggestionDomain}>{suggestion.slice(atIndex + 1)}</Text>
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
       {error ? (
         <Text accessibilityLiveRegion="polite" style={styles.errorText}>
           {error}
@@ -72,6 +132,9 @@ function AuthInput({
     </View>
   );
 }
+
+const SUGGESTION_ROW_HEIGHT = 36;
+const latinOnlyEmailError = 'use latin letters only (a-z), switch your keyboard to english.';
 
 function getAuthErrorMessage(error: { code?: string; message: string }, isSignup: boolean) {
   const details = `${error.code ?? ''} ${error.message}`.toLowerCase();
@@ -126,6 +189,7 @@ export function AuthScreen({ mode }: AuthScreenProps) {
   const [hasSubmitted, setHasSubmitted] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [authMessage, setAuthMessage] = useState<AuthMessage | null>(null);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [fields, setFields] = useState({
     nickname: '',
     email: '',
@@ -146,7 +210,9 @@ export function AuthScreen({ mode }: AuthScreenProps) {
     }
     if (!fields.email.trim()) {
       errors.email = 'email is required.';
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(fields.email.trim())) {
+    } else if (hasInvalidEmailChars(fields.email)) {
+      errors.email = latinOnlyEmailError;
+    } else if (!isValidEmail(fields.email)) {
       errors.email = 'enter a valid email address.';
     }
     if (!fields.password) {
@@ -159,10 +225,22 @@ export function AuthScreen({ mode }: AuthScreenProps) {
     } else if (isSignup && fields.repeatedPassword !== fields.password) {
       errors.repeatedPassword = 'passwords do not match.';
     }
+    if (isSignup && !acceptedTerms) {
+      errors.terms = 'accept the terms to continue.';
+    }
     return errors;
   };
-  const validationErrors = hasSubmitted ? getValidationErrors() : {};
-  const hasValidationErrors = Object.keys(validationErrors).length > 0;
+  const validationErrors: AuthErrors = hasSubmitted ? getValidationErrors() : {};
+  if (!validationErrors.email && hasInvalidEmailChars(fields.email)) {
+    // Shown while typing, before "next" is pressed, so Cyrillic is caught at once.
+    validationErrors.email = latinOnlyEmailError;
+  }
+  // The terms checkbox shows its own hint, so it should not squeeze the input fields.
+  const hasValidationErrors = Object.keys(validationErrors).some((field) => field !== 'terms');
+  const openLegal = (pathname: '/terms' | '/privacy') => {
+    Keyboard.dismiss();
+    router.push(pathname);
+  };
   const dismiss = () => {
     if (router.canGoBack()) {
       router.back();
@@ -187,7 +265,13 @@ export function AuthScreen({ mode }: AuthScreenProps) {
         const { data, error } = await supabase.auth.signUp({
           email,
           password: fields.password,
-          options: { data: { nickname } },
+          options: {
+            data: {
+              nickname,
+              terms_version: LEGAL_VERSION,
+              terms_accepted_at: new Date().toISOString(),
+            },
+          },
         });
 
         if (error) {
@@ -283,6 +367,7 @@ export function AuthScreen({ mode }: AuthScreenProps) {
                 <AuthInput
                   placeholder="email"
                   keyboardType="email-address"
+                  suggestEmails
                   error={validationErrors.email}
                   onChangeText={updateField('email')}
                   value={fields.email}
@@ -314,12 +399,47 @@ export function AuthScreen({ mode }: AuthScreenProps) {
                   {authMessage.text}
                 </Text>
               ) : null}
+              <View style={styles.consentRow}>
+                <Pressable
+                  accessibilityRole="checkbox"
+                  accessibilityLabel="I agree to the Terms of Use and Privacy Policy"
+                  accessibilityState={{ checked: acceptedTerms }}
+                  hitSlop={8}
+                  onPress={() => {
+                    setAcceptedTerms((accepted) => !accepted);
+                    setAuthMessage(null);
+                  }}
+                  style={[
+                    styles.checkbox,
+                    acceptedTerms && styles.checkboxChecked,
+                    validationErrors.terms && styles.checkboxError,
+                  ]}>
+                  {acceptedTerms ? <Text style={styles.checkboxMark}>✓</Text> : null}
+                </Pressable>
+                <Text style={[styles.consentText, validationErrors.terms && styles.consentTextError]}>
+                  I agree to the{' '}
+                  <Text
+                    accessibilityRole="link"
+                    onPress={() => openLegal('/terms')}
+                    style={styles.consentLink}>
+                    Terms of Use
+                  </Text>{' '}
+                  and{' '}
+                  <Text
+                    accessibilityRole="link"
+                    onPress={() => openLegal('/privacy')}
+                    style={styles.consentLink}>
+                    Privacy Policy
+                  </Text>
+                </Text>
+              </View>
             </>
           ) : (
             <View style={styles.loginFields}>
               <AuthInput
                 placeholder="email"
                 keyboardType="email-address"
+                suggestEmails
                 error={validationErrors.email}
                 onChangeText={updateField('email')}
                 value={fields.email}
@@ -427,6 +547,7 @@ const baseStyles = StyleSheet.create({
     top: '17.5%',
     left: '10%',
     width: '80%',
+    minHeight: 210,
     gap: 25,
   },
   input: {
@@ -440,6 +561,88 @@ const baseStyles = StyleSheet.create({
     shadowOpacity: 0.12,
     shadowRadius: 3,
     elevation: 2,
+  },
+  inputWithSuggestions: {
+    zIndex: 10,
+    elevation: 10,
+  },
+  suggestionList: {
+    position: 'absolute',
+    top: 49,
+    right: 0,
+    left: 0,
+    overflow: 'hidden',
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: '#444444',
+    borderRadius: 18,
+    backgroundColor: '#222222',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 10,
+  },
+  suggestionItem: {
+    height: SUGGESTION_ROW_HEIGHT,
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  suggestionPressed: {
+    backgroundColor: '#393939',
+  },
+  suggestionText: {
+    color: '#D2CCC4',
+    fontSize: 15,
+  },
+  suggestionDomain: {
+    color: '#F28C28',
+    fontWeight: '600',
+  },
+  consentRow: {
+    position: 'absolute',
+    left: 22,
+    right: 124,
+    bottom: 22,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: '#777777',
+    borderRadius: 7,
+    backgroundColor: '#222222',
+  },
+  checkboxChecked: {
+    borderColor: '#F28C28',
+    backgroundColor: '#F28C28',
+  },
+  checkboxError: {
+    borderColor: '#D47A62',
+  },
+  checkboxMark: {
+    marginTop: -1,
+    color: '#171717',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  consentText: {
+    flex: 1,
+    color: '#D2CCC4',
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  consentTextError: {
+    color: '#D47A62',
+  },
+  consentLink: {
+    color: '#F28C28',
+    textDecorationLine: 'underline',
   },
   inputError: {
     borderBottomColor: '#D47A62',
