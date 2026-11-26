@@ -956,7 +956,11 @@ function HomeContent({
           <Text style={styles.battleTitle}>{battle.title}</Text>
            {'owner' in battle && <Text style={styles.battleOwner}>Created by {battle.owner}</Text>}
            {'entries' in battle && battle.entries && battle.entries.length > 0 && (
-             <BattleEntries entries={battle.entries} onToggleVote={onToggleEntryVote} />
+             <BattleEntries
+               entries={battle.entries}
+               votingOpen={stage === 'active'}
+               onToggleVote={onToggleEntryVote}
+             />
            )}
            {'artworkUrl' in battle && battle.artworkUrl && !('entries' in battle && battle.entries?.length) && (
              <BattleMedia
@@ -1131,9 +1135,12 @@ function HomeContent({
 
 function BattleEntries({
   entries,
+  votingOpen,
   onToggleVote,
 }: {
   entries: UserBattleEntry[];
+  // Votes are accepted only in the Voting stage (see SCRUM-34 / format in SCRUM-42).
+  votingOpen: boolean;
   onToggleVote: (entry: UserBattleEntry) => Promise<void>;
 }) {
   const styles = useThemedStyles(baseStyles);
@@ -1142,12 +1149,20 @@ function BattleEntries({
   return (
     <View style={styles.entriesSection}>
       <Text style={styles.entriesHeading}>Players’ entries · {entries.length}</Text>
+      {!votingOpen && (
+        <Text style={styles.votingClosedText}>Voting starts when entries close</Text>
+      )}
       <ScrollView
         horizontal
         contentContainerStyle={styles.entriesList}
         showsHorizontalScrollIndicator={false}>
         {visibleEntries.map((entry) => (
-          <BattleEntryCard key={entry.id} entry={entry} onToggleVote={onToggleVote} />
+          <BattleEntryCard
+            key={entry.id}
+            entry={entry}
+            votingOpen={votingOpen}
+            onToggleVote={onToggleVote}
+          />
         ))}
       </ScrollView>
       {entries.length > visibleEntries.length && (
@@ -1159,15 +1174,17 @@ function BattleEntries({
 
 function BattleEntryCard({
   entry,
+  votingOpen,
   onToggleVote,
 }: {
   entry: UserBattleEntry;
+  votingOpen: boolean;
   onToggleVote: (entry: UserBattleEntry) => Promise<void>;
 }) {
   const styles = useThemedStyles(baseStyles);
   const [votePending, setVotePending] = useState(false);
   const [voteError, setVoteError] = useState(false);
-  const canVote = !entry.isMine && !entry.id.startsWith('local-');
+  const canVote = votingOpen && !entry.isMine && !entry.id.startsWith('local-');
 
   const toggleVote = async () => {
     setVotePending(true);
@@ -3172,6 +3189,12 @@ const baseStyles = StyleSheet.create({
     color: '#F5A047',
     fontSize: 12,
     fontWeight: '600',
+  },
+  votingClosedText: {
+    marginTop: 2,
+    marginBottom: 6,
+    color: '#AAA39A',
+    fontSize: 12,
   },
   voteError: {
     marginTop: 4,
